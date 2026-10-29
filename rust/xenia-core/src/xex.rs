@@ -8,6 +8,7 @@ use core::fmt;
 const XEX2_MAGIC: u32 = u32::from_be_bytes(*b"XEX2");
 const FIXED_HEADER_SIZE: usize = 24;
 const OPTIONAL_HEADER_ENTRY_SIZE: usize = 8;
+pub const XEX_HEADER_ENTRY_POINT: u32 = 0x0001_0100;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XexOptionalHeader {
@@ -22,6 +23,16 @@ pub struct XexHeader {
     pub reserved: u32,
     pub security_info_offset: u32,
     pub optional_headers: Vec<XexOptionalHeader>,
+}
+
+impl XexHeader {
+    /// Returns an inline value for an optional-header key, if present.
+    pub fn optional_header_value(&self, key: u32) -> Option<u32> {
+        self.optional_headers
+            .iter()
+            .find(|header| header.key == key)
+            .map(|header| header.value)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -128,6 +139,8 @@ mod tests {
         assert_eq!(parsed.optional_headers.len(), 1);
         assert_eq!(parsed.optional_headers[0].key, 0x0001_0002);
         assert_eq!(parsed.optional_headers[0].value, 0x40);
+        assert_eq!(parsed.optional_header_value(0x0001_0002), Some(0x40));
+        assert_eq!(parsed.optional_header_value(0xDEAD_BEEF), None);
     }
 
     #[test]
