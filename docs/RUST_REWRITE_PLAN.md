@@ -25,15 +25,16 @@ implementation track.
 
 Areas requiring a detailed audit:
 - src/xenia/cpu: Xenon/PowerPC execution, decoding, and JIT.
-- Memory and base/platform code: guest address space, mappings, permissions, MMIO.
+- src/xenia/memory.h and src/xenia/base: guest address space, mappings, permissions, MMIO.
 - src/xenia/kernel: threads, synchronization, objects, modules, and guest APIs.
 - src/xenia/gpu: command processing, shaders, render targets, graphics backends.
 - src/xenia/apu: audio processing and guest audio interfaces.
-- HID/input, VFS, executable loader, UI, configuration, and platform integration.
+- src/xenia/hid, src/xenia/vfs, executable loading, UI, configuration, and platform integration.
 - third_party and Git submodules: dependency and license inventory.
 
-This is a high-level map, not a completed audit. Fork-specific changes still need
-to be compared with the parent repository.
+See [Technical Audit — Phase 1](TECHNICAL_AUDIT_PHASE_1.md) for source-based findings.
+The audit is preliminary: only a sample of files has been compared against upstream,
+and the full repository delta remains open.
 
 ## Architecture principles
 
@@ -51,15 +52,19 @@ to be compared with the parent repository.
 - [x] Preserve the C++ baseline and create a separate Rust branch.
 - [x] Add Cargo workspace, core/CLI crates, and checked memory primitive.
 - [ ] Run formatting, tests, and Clippy in a real Rust toolchain environment.
-- [ ] Record exact parent/base commit and inventory fork-specific changes.
+- [ ] Record exact parent/base commit and inventory all fork-specific changes.
 
 Acceptance: Rust builds independently, tests pass, and the C++ tree remains untouched.
 
 ### M1 — Source and behavior audit
-- [ ] Inventory modules, generated code, submodules, and third-party libraries.
-- [ ] Compare this fork with its parent to identify Canary-specific changes.
-- [ ] Document CPU, memory, loader, kernel, GPU, and audio interfaces.
+- [ ] Inventory all modules, generated code, submodules, and third-party libraries.
+- [ ] Compare all tracked files with upstream and inspect fork history/submodule gitlinks.
+- [ ] Document CPU, memory, loader, kernel, GPU, audio, HID, and VFS interfaces.
 - [ ] Define compatibility tests and legally sourced fixtures.
+
+Progress: first-pass source/build inspection is recorded in TECHNICAL_AUDIT_PHASE_1.md.
+A small sample of tracked files has identical blob SHAs to upstream Canary; this is
+not yet a complete fork comparison.
 
 ### M2 — Memory and executable foundations
 - [ ] Add mapped address-space abstraction, endianness-safe access, permissions, and MMIO.
