@@ -102,8 +102,9 @@ with big-endian 32-bit reads/writes; a non-overlapping, permissioned region-base
 address space with protect/unmap operations; a memory-access interface shared by
 CPU and memory models, including execute-permission checks for instruction fetch; a
 deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
-beq/bne forms, lwz and stw); and a defensive XEX2 fixed-header/optional-header
-parser that validates the declared header size. The CLI can inspect XEX2 metadata. Unsupported CPU opcodes fail explicitly.
+beq/bne forms, lwz and stw); and defensive XEX2 fixed-header/optional-header and Xbox PE32 header/section
+parsers. Both parsers have malformed-input tests; the CLI can inspect XEX2 and
+PE metadata. Unsupported CPU opcodes fail explicitly.
 This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
 page-level permissions, decryption/decompression, PE section mapping, kernel
 services, concurrency, most PPC instructions and exception semantics remain
