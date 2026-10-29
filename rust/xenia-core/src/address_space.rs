@@ -40,6 +40,7 @@ pub enum AddressSpaceError {
     EmptyRegion,
     AddressRangeOverflow,
     OverlappingRegion,
+    RegionNotFound,
     UnmappedAddress,
     PermissionDenied,
     Memory(MemoryError),
@@ -115,6 +116,32 @@ impl GuestAddressSpace {
             permissions,
         });
         self.regions.sort_by_key(Region::start);
+        Ok(())
+    }
+
+    /// Changes permissions for the region whose base address matches exactly.
+    pub fn protect(
+        &mut self,
+        base: GuestAddress,
+        permissions: MemoryPermissions,
+    ) -> Result<(), AddressSpaceError> {
+        let region = self
+            .regions
+            .iter_mut()
+            .find(|region| region.memory.base() == base)
+            .ok_or(AddressSpaceError::RegionNotFound)?;
+        region.permissions = permissions;
+        Ok(())
+    }
+
+    /// Removes the region whose base address matches exactly.
+    pub fn unmap(&mut self, base: GuestAddress) -> Result<(), AddressSpaceError> {
+        let index = self
+            .regions
+            .iter()
+            .position(|region| region.memory.base() == base)
+            .ok_or(AddressSpaceError::RegionNotFound)?;
+        self.regions.remove(index);
         Ok(())
     }
 
