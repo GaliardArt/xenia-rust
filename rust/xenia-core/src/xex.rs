@@ -18,7 +18,7 @@ pub struct XexOptionalHeader {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XexHeader {
     pub module_flags: u32,
-    pub pe_data_offset: u32,
+    pub header_size: u32,
     pub reserved: u32,
     pub security_info_offset: u32,
     pub optional_headers: Vec<XexOptionalHeader>,
@@ -29,6 +29,7 @@ pub enum XexError {
     TruncatedHeader,
     InvalidMagic,
     OptionalHeaderTableOutOfBounds,
+    InvalidHeaderSize,
 }
 
 impl fmt::Display for XexError {
@@ -39,6 +40,7 @@ impl fmt::Display for XexError {
             Self::OptionalHeaderTableOutOfBounds => {
                 f.write_str("XEX2 optional-header table exceeds file bounds")
             }
+            Self::InvalidHeaderSize => f.write_str("invalid XEX2 header size"),
         }
     }
 }
@@ -56,7 +58,7 @@ pub fn parse_xex2_header(bytes: &[u8]) -> Result<XexHeader, XexError> {
     }
 
     let module_flags = read_u32_be(bytes, 4)?;
-    let pe_data_offset = read_u32_be(bytes, 8)?;
+    let header_size = read_u32_be(bytes, 8)?;
     let reserved = read_u32_be(bytes, 12)?;
     let security_info_offset = read_u32_be(bytes, 16)?;
     let optional_header_count = read_u32_be(bytes, 20)? as usize;
@@ -70,6 +72,9 @@ pub fn parse_xex2_header(bytes: &[u8]) -> Result<XexHeader, XexError> {
     if table_end > bytes.len() {
         return Err(XexError::OptionalHeaderTableOutOfBounds);
     }
+    if header_size as usize < table_end || header_size as usize > bytes.len() {
+        return Err(XexError::InvalidHeaderSize);
+    }
 
     let mut optional_headers = Vec::with_capacity(optional_header_count);
     for index in 0..optional_header_count {
@@ -82,7 +87,7 @@ pub fn parse_xex2_header(bytes: &[u8]) -> Result<XexHeader, XexError> {
 
     Ok(XexHeader {
         module_flags,
-        pe_data_offset,
+        header_size,
         reserved,
         security_info_offset,
         optional_headers,
@@ -101,9 +106,10 @@ mod tests {
 
     fn header_with_count(count: u32) -> Vec<u8> {
         let mut bytes = Vec::from(*b"XEX2");
-        for value in [0x1234, 0x40, 0, 0x80, count] {
+        for value in [0x1234, 0x40, 0, 0x30, count] {
             bytes.extend_from_slice(&value.to_be_bytes());
         }
+        bytes.resize(0x40, 0);
         bytes
     }
 
@@ -116,7 +122,7 @@ mod tests {
         let parsed = parse_xex2_header(&bytes).unwrap();
 
         assert_eq!(parsed.module_flags, 0x1234);
-        assert_eq!(parsed.pe_data_offset, 0x40);
+        assert_eq!(parsed.header_size, 0x40);
         assert_eq!(parsed.reserved, 0);
         assert_eq!(parsed.security_info_offset, 0x80);
         assert_eq!(parsed.optional_headers.len(), 1);
@@ -137,8 +143,15 @@ mod tests {
     }
 
     #[test]
+    fn rejects_header_size_outside_file_bounds() {
+        let mut bytes = header_with_count(0);
+        bytes[8..12].copy_from_slice(&0x100_u32.to_be_bytes());
+        assert_eq!(parse_xex2_header(&bytes), Err(XexError::InvalidHeaderSize));
+    }
+
+    #[test]
     fn rejects_optional_header_table_past_end() {
-        let bytes = header_with_count(1);
+        let bytes = header_with_count(6);
         assert_eq!(
             parse_xex2_header(&bytes),
             Err(XexError::OptionalHeaderTableOutOfBounds)
