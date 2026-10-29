@@ -120,7 +120,6 @@ impl GuestMemoryAccess for GuestMemory {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{GuestAddress, GuestMemory, MemoryError};
