@@ -6,11 +6,13 @@ Working branch: `rust-rewrite`
 
 ## Scope and confidence
 
-This is a first-pass architectural audit based on repository source and build metadata. It is not a full semantic review, a complete file-by-file diff, or a successful build/test report. No Rust toolchain execution was performed during this audit.
+This is a source/build audit with a complete tracked-tree comparison against upstream at the audited ref. It is not yet a full semantic review of every source file or a game-compatibility report. Local toolchain execution is unavailable in this environment; validation is being performed through GitHub Actions.
 
 ## 1. Fork delta against upstream Canary
 
-The following files were fetched from both `GaliardArt/xenia-rust` and `xenia-canary/xenia-canary`, at `canary_experimental`. Their Git blob SHAs match exactly:
+A recursive Git tree comparison was performed between `GaliardArt/xenia-rust` and `xenia-canary/xenia-canary`, both at `canary_experimental`. Both trees resolve to commit/tree SHA `48b318a2ad7c36f8f3901a94e290ba70ae0ffec5`, with 2,097 entries each. There were zero paths unique to either repository, zero blob/gitlink SHA differences, and zero mode/type differences. All 33 third-party submodule gitlinks match exactly. The repositories point to the same upstream commit at this ref.
+
+The following representative files were also fetched individually from both repositories; their blob SHAs match exactly:
 
 - `CMakeLists.txt`
 - `src/xenia/cpu/CMakeLists.txt`
@@ -20,7 +22,7 @@ The following files were fetched from both `GaliardArt/xenia-rust` and `xenia-ca
 - `.gitmodules`
 - `src/xenia/memory.h`
 
-Conclusion: these sampled files show no fork-specific changes relative to upstream at the compared ref. This does **not** prove the whole fork is identical; a repository-wide comparison of all tracked files, submodule gitlinks, and history is still required.
+Conclusion: at `canary_experimental`, the tracked source tree and submodule pointers are identical to upstream. The fork's prior work is therefore represented by its upstream history at this branch, not a tracked-source divergence. This comparison does not compare untracked local files or private configuration; the GitHub tree endpoint reported no truncation.
 
 ## 2. Subsystem findings
 
@@ -83,8 +85,8 @@ Rust implication:
 
 ## 3. Proposed implementation order
 
-1. **M0 validation:** run `cargo fmt`, `cargo test`, and Clippy in a real Rust environment; add CI so these checks are repeatable.
-2. **M1 repository inventory:** compare all tracked files against upstream, inspect submodule gitlinks and recent fork history, and publish a subsystem/dependency matrix.
+1. **M0 validation:** a Rust GitHub Actions workflow now runs `cargo fmt`, `cargo test`, and Clippy; fix any failures until the latest run is green.
+2. **M1 repository inventory:** tracked-tree comparison and all 33 submodule gitlinks are complete for the audited ref. A detailed semantic inventory of all subsystems remains in progress.
 3. **M2 memory contracts:** define guest address spaces, checked translation, region permissions, endian-safe reads/writes, MMIO routing, and invalidation events; add property and boundary tests.
 4. **M3 executable foundations:** identify supported XEX/container formats and document parsing/loading responsibilities before implementing a loader.
 5. **M4 CPU interpreter:** architectural state, instruction decode, integer/control-flow/load-store first; then floating-point/vector behavior and exceptions.
@@ -94,8 +96,8 @@ Rust implication:
 
 ## 4. Risks and open questions
 
-- A complete fork-vs-upstream diff has not yet been run; only the sampled files listed above were compared.
-- Build/test status of the new Cargo workspace remains unverified in a Rust toolchain.
+- The tracked Git tree and all 33 submodule pointers match upstream exactly at the audited ref; a semantic source-by-source behavior audit remains incomplete.
+- Local clone/build was blocked by the execution environment's lack of network DNS. GitHub Actions is the validation path; the latest CI result must be checked after each code change.
 - The Rust workspace is currently a scaffold; it cannot load or execute Xbox 360 games.
 - Memory/JIT/GPU coherence and thread scheduling are high-risk cross-subsystem contracts.
 - Third-party reuse must respect each upstream license and preserve notices.
