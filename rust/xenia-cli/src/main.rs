@@ -68,7 +68,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 let name = String::from_utf8_lossy(&section.name);
                 println!(
                     "    [{index:03}] {} RVA=0x{:08X} size=0x{:X} flags=0x{:08X}",
-                    name.trim_end_matches('\\0'),
+                    name.trim_end_matches(char::from(0)),
                     section.virtual_address,
                     section.virtual_size,
                     section.characteristics
