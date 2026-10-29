@@ -91,7 +91,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("  xenia-rust --help");
             println!();
             println!(
-                "The current build can inspect XEX2 header metadata only; it cannot run games."
+                "The current build can inspect XEX2 and Xbox PE32 metadata; it cannot run games."
             );
             Ok(())
         }
