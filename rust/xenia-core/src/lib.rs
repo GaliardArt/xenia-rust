@@ -9,4 +9,6 @@ pub mod xex;
 pub use address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
 pub use cpu::{PpcError, PpcInterpreter, PpcState};
 pub use memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
-pub use xex::{XexError, XexHeader, XexOptionalHeader, parse_xex2_header};
+pub use xex::{
+    XEX_HEADER_ENTRY_POINT, XexError, XexHeader, XexOptionalHeader, parse_xex2_header,
+};
