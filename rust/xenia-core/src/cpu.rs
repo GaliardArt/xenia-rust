@@ -310,7 +310,11 @@ mod tests {
     fn interpreter_uses_permissioned_address_space() {
         let mut memory = GuestAddressSpace::new();
         memory
-            .map(GuestAddress(0x1000), 16, MemoryPermissions::READ_WRITE_EXECUTE)
+            .map(
+                GuestAddress(0x1000),
+                16,
+                MemoryPermissions::READ_WRITE_EXECUTE,
+            )
             .unwrap();
         memory
             .write_u32_be(GuestAddress(0x1000), (14 << 26) | (3 << 21) | 9)
