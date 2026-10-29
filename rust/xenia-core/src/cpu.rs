@@ -5,8 +5,8 @@
 
 use core::cmp::Ordering;
 
-use crate::address_space::{AddressSpaceError, GuestAddressSpace};
-use crate::memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
+use crate::address_space::AddressSpaceError;
+use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PpcState {
@@ -214,6 +214,7 @@ impl PpcInterpreter {
 #[cfg(test)]
 mod tests {
     use super::{PpcError, PpcInterpreter};
+    use crate::address_space::{GuestAddressSpace, MemoryPermissions};
     use crate::memory::{GuestAddress, GuestMemory, MemoryError};
 
     fn put_instruction(memory: &mut GuestMemory, pc: u32, instruction: u32) {
@@ -314,7 +315,7 @@ mod tests {
             .map(
                 GuestAddress(0x1000),
                 16,
-                crate::address_space::MemoryPermissions::READ_WRITE,
+                MemoryPermissions::READ_WRITE,
             )
             .unwrap();
         memory
