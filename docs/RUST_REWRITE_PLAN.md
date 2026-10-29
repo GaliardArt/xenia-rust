@@ -98,10 +98,12 @@ being checked again.
 ## Current implementation status
 
 The xenia-core crate now contains a contiguous, bounds-checked memory region with
-big-endian 32-bit reads/writes and a small deterministic PPC interpreter subset
-(addi, addis, ori, oris, b, lwz and stw). Unsupported opcodes fail explicitly.
-This is not a complete Xbox 360 memory model: virtual mapping, permissions, MMIO,
-multi-region access, concurrency, most PPC instructions and exception semantics
+big-endian 32-bit reads/writes; a deterministic PPC subset (addi, addis, ori,
+oris, b, cmpwi/cmplwi, CR-only beq/bne forms, lwz and stw); and a defensive XEX2
+fixed-header/optional-header parser. Unsupported CPU opcodes fail explicitly.
+This is not a complete Xbox 360 memory model or executable loader: virtual
+mapping, permissions, MMIO, multi-region access, decryption/decompression, PE
+section mapping, concurrency, most PPC instructions and exception semantics
 remain future work. The xenia-rust executable is still a diagnostic shell and
 cannot run Xbox 360 games.
 
