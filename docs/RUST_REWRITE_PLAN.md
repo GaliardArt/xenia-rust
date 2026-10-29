@@ -62,9 +62,12 @@ Acceptance: Rust builds independently, tests pass, and the C++ tree remains unto
 - [ ] Document CPU, memory, loader, kernel, GPU, audio, HID, and VFS interfaces.
 - [ ] Define compatibility tests and legally sourced fixtures.
 
-Progress: first-pass source/build inspection is recorded in TECHNICAL_AUDIT_PHASE_1.md.
-A small sample of tracked files has identical blob SHAs to upstream Canary; this is
-not yet a complete fork comparison.
+Progress: the complete recursive tracked tree matches upstream at baseline commit
+48b318a2ad7c36f8f3901a94e290ba70ae0ffec5: 2,097 tree entries, zero path/SHA/mode
+differences, and 33 identical submodule gitlinks. See TECHNICAL_AUDIT_PHASE_1.md
+and SUBSYSTEM_INVENTORY.md. GitHub Actions successfully passed format, tests and
+Clippy for the initial PPC/memory implementation; each subsequent code change is
+being checked again.
 
 ### M2 — Memory and executable foundations
 - [ ] Add mapped address-space abstraction, endianness-safe access, permissions, and MMIO.
@@ -94,10 +97,13 @@ not yet a complete fork comparison.
 
 ## Current implementation status
 
-The xenia-core crate currently contains only a contiguous, bounds-checked byte
-region with unit tests. It is not a complete Xbox 360 memory model: virtual
-mapping, permissions, MMIO, multi-region access, and concurrency remain future work.
-The xenia-rust executable is a diagnostic shell and cannot run Xbox 360 games.
+The xenia-core crate now contains a contiguous, bounds-checked memory region with
+big-endian 32-bit reads/writes and a small deterministic PPC interpreter subset
+(addi, addis, ori, oris, b, lwz and stw). Unsupported opcodes fail explicitly.
+This is not a complete Xbox 360 memory model: virtual mapping, permissions, MMIO,
+multi-region access, concurrency, most PPC instructions and exception semantics
+remain future work. The xenia-rust executable is still a diagnostic shell and
+cannot run Xbox 360 games.
 
 ## Local validation commands
 
