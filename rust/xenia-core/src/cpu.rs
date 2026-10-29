@@ -61,6 +61,32 @@ impl PpcInterpreter {
                 self.state.gpr[rt_rs] = base.wrapping_add((immediate << 16) as u64);
                 self.state.pc = next_pc;
             }
+            // lwz RT,D(RA) — load a zero-extended 32-bit word.
+            32 => {
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
+                let address = base.wrapping_add(immediate as u32);
+                self.state.gpr[rt_rs] =
+                    memory.read_u32_be(GuestAddress(address))? as u64;
+                self.state.pc = next_pc;
+            }
+            // stw RS,D(RA) — store the low 32 bits of RS.
+            36 => {
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
+                let address = base.wrapping_add(immediate as u32);
+                memory.write_u32_be(
+                    GuestAddress(address),
+                    self.state.gpr[rt_rs] as u32,
+                )?;
+                self.state.pc = next_pc;
+            }
             // ori RA,RS,UIMM — destination is RA, source is RS.
             24 => {
                 let destination = ra;
@@ -154,6 +180,25 @@ mod tests {
 
         assert_eq!(cpu.state.pc, 0x1008);
         assert_eq!(cpu.state.lr, 0x1004);
+    }
+
+    #[test]
+    fn stw_and_lwz_round_trip_big_endian_memory() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 32);
+        // stw r3, 16(r0)
+        put_instruction(&mut memory, 0x1000, (36 << 26) | (3 << 21) | 16);
+        // lwz r4, 16(r0)
+        put_instruction(&mut memory, 0x1004, (32 << 26) | (4 << 21) | 16);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1234_ABCD_FEDC_BA98;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(memory.read_u32_be(GuestAddress(0x1010)), Ok(0xFEDC_BA98));
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[4], 0xFEDC_BA98);
+        assert_eq!(cpu.state.pc, 0x1008);
     }
 
     #[test]
