@@ -105,6 +105,11 @@ pub trait GuestMemoryAccess {
     type Error;
 
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error>;
+
+    fn fetch_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
+        self.read_u32_be(address)
+    }
+
     fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error>;
 }
 
