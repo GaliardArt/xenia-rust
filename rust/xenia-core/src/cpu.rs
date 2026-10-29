@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn stw_and_lwz_round_trip_big_endian_memory() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 32);
+        let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
         // stw r3, 16(r0)
         put_instruction(&mut memory, 0x1000, (36 << 26) | (3 << 21) | 16);
         // lwz r4, 16(r0)
@@ -190,7 +190,7 @@ mod tests {
         cpu.state.gpr[3] = 0x1234_ABCD_FEDC_BA98;
 
         cpu.step(&mut memory).unwrap();
-        assert_eq!(memory.read_u32_be(GuestAddress(0x1010)), Ok(0xFEDC_BA98));
+        assert_eq!(memory.read_u32_be(GuestAddress(0x10)), Ok(0xFEDC_BA98));
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.gpr[4], 0xFEDC_BA98);
