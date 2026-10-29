@@ -31,28 +31,50 @@ pub struct GuestMemory {
 
 impl GuestMemory {
     pub fn new(base: GuestAddress, size: usize) -> Self {
-        Self { base, bytes: vec![0; size] }
+        Self {
+            base,
+            bytes: vec![0; size],
+        }
     }
 
-    pub const fn base(&self) -> GuestAddress { self.base }
-    pub fn len(&self) -> usize { self.bytes.len() }
-    pub fn is_empty(&self) -> bool { self.bytes.is_empty() }
+    pub const fn base(&self) -> GuestAddress {
+        self.base
+    }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
 
     pub fn read_u8(&self, address: GuestAddress) -> Result<u8, MemoryError> {
         let offset = self.offset_of(address)?;
-        self.bytes.get(offset).copied().ok_or(MemoryError::OutOfBounds)
+        self.bytes
+            .get(offset)
+            .copied()
+            .ok_or(MemoryError::OutOfBounds)
     }
 
     pub fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
-        let byte = self.bytes.get_mut(offset).ok_or(MemoryError::OutOfBounds)?;
+        let byte = self
+            .bytes
+            .get_mut(offset)
+            .ok_or(MemoryError::OutOfBounds)?;
         *byte = value;
         Ok(())
     }
 
     fn offset_of(&self, address: GuestAddress) -> Result<usize, MemoryError> {
-        let offset = address.0.checked_sub(self.base.0).ok_or(MemoryError::OutOfBounds)? as usize;
-        if offset >= self.bytes.len() { return Err(MemoryError::OutOfBounds); }
+        let offset = address
+            .0
+            .checked_sub(self.base.0)
+            .ok_or(MemoryError::OutOfBounds)? as usize;
+        if offset >= self.bytes.len() {
+            return Err(MemoryError::OutOfBounds);
+        }
         Ok(offset)
     }
 }
@@ -71,14 +93,41 @@ mod tests {
     #[test]
     fn rejects_addresses_outside_region() {
         let memory = GuestMemory::new(GuestAddress(0x1000), 16);
-        assert_eq!(memory.read_u8(GuestAddress(0x0FFF)), Err(MemoryError::OutOfBounds));
-        assert_eq!(memory.read_u8(GuestAddress(0x1010)), Err(MemoryError::OutOfBounds));
+        assert_eq!(
+            memory.read_u8(GuestAddress(0x0FFF)),
+            Err(MemoryError::OutOfBounds)
+        );
+        assert_eq!(
+            memory.read_u8(GuestAddress(0x1010)),
+            Err(MemoryError::OutOfBounds)
+        );
     }
 
     #[test]
     fn empty_region_has_no_valid_addresses() {
         let memory = GuestMemory::new(GuestAddress(0x1000), 0);
         assert!(memory.is_empty());
-        assert_eq!(memory.read_u8(GuestAddress(0x1000)), Err(MemoryError::OutOfBounds));
+        assert_eq!(
+            memory.read_u8(GuestAddress(0x1000)),
+            Err(MemoryError::OutOfBounds)
+        );
+    }
+
+    #[test]
+    fn region_near_address_space_end_does_not_wrap() {
+        let mut memory = GuestMemory::new(GuestAddress(u32::MAX - 1), 4);
+        memory.write_u8(GuestAddress(u32::MAX), 0xCD).unwrap();
+        assert_eq!(memory.read_u8(GuestAddress(u32::MAX)), Ok(0xCD));
+        assert_eq!(
+            memory.read_u8(GuestAddress(0)),
+            Err(MemoryError::OutOfBounds)
+        );
+    }
+
+    #[test]
+    fn reports_region_length_and_base() {
+        let memory = GuestMemory::new(GuestAddress(0x2000), 7);
+        assert_eq!(memory.base(), GuestAddress(0x2000));
+        assert_eq!(memory.len(), 7);
     }
 }
