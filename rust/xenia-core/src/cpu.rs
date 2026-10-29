@@ -66,9 +66,7 @@ impl PpcInterpreter {
         M::Error: Into<PpcError>,
     {
         let pc = self.state.pc;
-        let instruction = memory
-            .read_u32_be(GuestAddress(pc))
-            .map_err(Into::into)?;
+        let instruction = memory.read_u32_be(GuestAddress(pc)).map_err(Into::into)?;
         let opcode = instruction >> 26;
         let rt_rs = ((instruction >> 21) & 0x1F) as usize;
         let ra = ((instruction >> 16) & 0x1F) as usize;
@@ -312,11 +310,7 @@ mod tests {
     fn interpreter_uses_permissioned_address_space() {
         let mut memory = GuestAddressSpace::new();
         memory
-            .map(
-                GuestAddress(0x1000),
-                16,
-                MemoryPermissions::READ_WRITE,
-            )
+            .map(GuestAddress(0x1000), 16, MemoryPermissions::READ_WRITE)
             .unwrap();
         memory
             .write_u32_be(GuestAddress(0x1000), (14 << 26) | (3 << 21) | 9)
