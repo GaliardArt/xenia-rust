@@ -69,8 +69,7 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                self.state.gpr[rt_rs] =
-                    memory.read_u32_be(GuestAddress(address))? as u64;
+                self.state.gpr[rt_rs] = memory.read_u32_be(GuestAddress(address))? as u64;
                 self.state.pc = next_pc;
             }
             // stw RS,D(RA) — store the low 32 bits of RS.
@@ -81,10 +80,7 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                memory.write_u32_be(
-                    GuestAddress(address),
-                    self.state.gpr[rt_rs] as u32,
-                )?;
+                memory.write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)?;
                 self.state.pc = next_pc;
             }
             // ori RA,RS,UIMM — destination is RA, source is RS.
