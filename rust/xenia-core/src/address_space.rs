@@ -166,6 +166,18 @@ impl GuestAddressSpace {
     }
 }
 
+impl crate::memory::GuestMemoryAccess for GuestAddressSpace {
+    type Error = AddressSpaceError;
+
+    fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
+        GuestAddressSpace::read_u32_be(self, address)
+    }
+
+    fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
+        GuestAddressSpace::write_u32_be(self, address, value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
