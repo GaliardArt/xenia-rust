@@ -3,6 +3,8 @@
 
 pub mod cpu;
 pub mod memory;
+pub mod xex;
 
 pub use cpu::{PpcError, PpcInterpreter, PpcState};
 pub use memory::{GuestAddress, GuestMemory, MemoryError};
+pub use xex::{XexError, XexHeader, XexOptionalHeader, parse_xex2_header};
