@@ -68,16 +68,15 @@ impl GuestMemory {
     pub fn read_u32_be(&self, address: GuestAddress) -> Result<u32, MemoryError> {
         let offset = self.offset_of(address)?;
         let end = offset.checked_add(4).ok_or(MemoryError::OutOfBounds)?;
-        let bytes = self.bytes.get(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self
+            .bytes
+            .get(offset..end)
+            .ok_or(MemoryError::OutOfBounds)?;
         Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
     /// Writes a 32-bit value in the Xbox 360's big-endian byte order.
-    pub fn write_u32_be(
-        &mut self,
-        address: GuestAddress,
-        value: u32,
-    ) -> Result<(), MemoryError> {
+    pub fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
         let end = offset.checked_add(4).ok_or(MemoryError::OutOfBounds)?;
         let bytes = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
@@ -145,7 +144,9 @@ mod tests {
     #[test]
     fn reads_and_writes_big_endian_words() {
         let mut memory = GuestMemory::new(GuestAddress(0x3000), 8);
-        memory.write_u32_be(GuestAddress(0x3002), 0x1234_ABCD).unwrap();
+        memory
+            .write_u32_be(GuestAddress(0x3002), 0x1234_ABCD)
+            .unwrap();
         assert_eq!(memory.read_u32_be(GuestAddress(0x3002)), Ok(0x1234_ABCD));
         assert_eq!(memory.read_u8(GuestAddress(0x3002)), Ok(0x12));
         assert_eq!(memory.read_u8(GuestAddress(0x3005)), Ok(0xCD));
