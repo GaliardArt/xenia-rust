@@ -116,8 +116,8 @@ mod tests {
     #[test]
     fn parses_fixed_header_and_optional_headers() {
         let mut bytes = header_with_count(1);
-        bytes.extend_from_slice(&0x0001_0002_u32.to_be_bytes());
-        bytes.extend_from_slice(&0x0000_0040_u32.to_be_bytes());
+        bytes[24..28].copy_from_slice(&0x0001_0002_u32.to_be_bytes());
+        bytes[28..32].copy_from_slice(&0x0000_0040_u32.to_be_bytes());
 
         let parsed = parse_xex2_header(&bytes).unwrap();
 
