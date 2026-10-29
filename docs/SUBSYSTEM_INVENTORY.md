@@ -64,7 +64,7 @@ Additional direct `src/xenia` files include the emulator orchestration layer, co
 ## Current Rust track
 
 The current Rust workspace contains:
-- `xenia-core`: checked contiguous memory primitive with big-endian word access and a small PPC interpreter subset (addi, addis, ori, oris and unconditional branch).
+- `xenia-core`: checked contiguous memory primitive with big-endian word access; initial PPC subset (addi, addis, ori, oris, b, CR compares, CR-only beq/bne forms, lwz and stw); defensive XEX2 fixed-header/optional-header metadata parser.
 - `xenia-rust`: diagnostic CLI shell only.
 
-This subset is a learning/test foundation, not a usable emulator. Missing instruction families, exceptions, full MMU behavior, executable loading, kernel APIs, graphics, audio, input, threading semantics, and game-level compatibility remain substantial work.
+These components are learning/test foundations, not a usable emulator. The XEX2 code does not decrypt/decompress, parse the embedded PE, map sections, or boot a title. Missing PPC instruction families, exceptions, full MMU behavior, executable loading, kernel APIs, graphics, audio, input, threading semantics, and game-level compatibility remain substantial work.
