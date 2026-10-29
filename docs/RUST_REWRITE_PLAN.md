@@ -99,7 +99,8 @@ being checked again.
 
 The xenia-core crate now contains a contiguous, bounds-checked memory region
 with big-endian 32-bit reads/writes; a non-overlapping, permissioned region-based
-address space; a memory-access interface shared by the CPU and memory models; a
+address space with protect/unmap operations; a memory-access interface shared by
+CPU and memory models, including execute-permission checks for instruction fetch; a
 deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
 beq/bne forms, lwz and stw); and a defensive XEX2 fixed-header/optional-header
 parser. The CLI can inspect XEX2 metadata. Unsupported CPU opcodes fail explicitly.
