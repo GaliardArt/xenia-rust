@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, ErrorKind};
 
-use xenia_core::{XEX_HEADER_ENTRY_POINT, parse_xex2_header};
+use xenia_core::{XEX_HEADER_ENTRY_POINT, parse_xbox_pe32, parse_xex2_header};
 
 fn main() {
     if let Err(error) = run() {
@@ -47,6 +47,35 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             Ok(())
         }
+        Some("inspect-pe") => {
+            let path = args
+                .next()
+                .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "missing PE image path"))?;
+            if args.next().is_some() {
+                return Err(
+                    io::Error::new(ErrorKind::InvalidInput, "unexpected extra arguments").into(),
+                );
+            }
+
+            let bytes = fs::read(&path)?;
+            let image = parse_xbox_pe32(&bytes)?;
+            println!("Xbox 360 PE32 image: {path}");
+            println!("  image base:          0x{:08X}", image.image_base);
+            println!("  entry-point RVA:     0x{:08X}", image.entry_point_rva);
+            println!("  subsystem:           {}", image.subsystem);
+            println!("  sections:             {}", image.sections.len());
+            for (index, section) in image.sections.iter().enumerate() {
+                let name = String::from_utf8_lossy(&section.name);
+                println!(
+                    "    [{index:03}] {} RVA=0x{:08X} size=0x{:X} flags=0x{:08X}",
+                    name.trim_end_matches('\\0'),
+                    section.virtual_address,
+                    section.virtual_size,
+                    section.characteristics
+                );
+            }
+            Ok(())
+        }
         Some("--version") | Some("-V") => {
             println!("xenia-rust {}", env!("CARGO_PKG_VERSION"));
             println!("experimental Rust rewrite; game execution is not implemented");
@@ -57,6 +86,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!();
             println!("Usage:");
             println!("  xenia-rust inspect-xex <file.xex>");
+            println!("  xenia-rust inspect-pe <decompressed-image.bin>");
             println!("  xenia-rust --version");
             println!("  xenia-rust --help");
             println!();
