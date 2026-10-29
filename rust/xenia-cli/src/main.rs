@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, ErrorKind};
 
-use xenia_core::parse_xex2_header;
+use xenia_core::{XEX_HEADER_ENTRY_POINT, parse_xex2_header};
 
 fn main() {
     if let Err(error) = run() {
@@ -36,6 +36,9 @@ fn run() -> Result<(), Box<dyn Error>> {
                 header.security_info_offset
             );
             println!("  optional headers:    {}", header.optional_headers.len());
+            if let Some(entry_point) = header.optional_header_value(XEX_HEADER_ENTRY_POINT) {
+                println!("  entry point:         0x{entry_point:08X}");
+            }
             for (index, optional) in header.optional_headers.iter().enumerate() {
                 println!(
                     "    [{index:03}] key=0x{:08X} value=0x{:08X}",
