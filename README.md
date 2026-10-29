@@ -1,75 +1,99 @@
+# Xenia Rust
+
 <p align="center">
-    <a href="https://github.com/xenia-canary/xenia-canary/tree/canary_experimental/assets/icon">
-        <img height="256px" src="https://raw.githubusercontent.com/xenia-canary/xenia/master/assets/icon/256.png" />
-    </a>
+  <img height="160" src="https://raw.githubusercontent.com/xenia-canary/xenia/master/assets/icon/256.png" alt="Xenia emulator icon" />
 </p>
 
-<h1 align="center">Xenia Canary - Xbox 360 Emulator</h1>
+<h1 align="center">Xenia Rust — A Rust Rewrite of Xenia Canary</h1>
 
-Xenia Canary is an experimental fork of the Xenia emulator. For more information, see the
-[Xenia Canary wiki](https://github.com/xenia-canary/xenia-canary/wiki).
+<p align="center">
+  An experimental, long-term effort to bring the <a href="https://github.com/xenia-canary/xenia-canary">Xenia Canary</a> Xbox 360 emulator to Rust.
+</p>
 
-Come chat with us about **emulator-related topics** on [Discord](https://discord.gg/Q9mxZf9).
-For developer chat join `#dev` but stay on topic. Lurking is not only fine, but encouraged!
-Please check the [FAQ](https://github.com/xenia-canary/xenia-canary/wiki/FAQ) page before asking questions.
-We've got jobs/lives/etc, so don't expect instant answers.
+> **Project status: early development.** This repository is being used to progressively reimplement Xenia's emulator architecture in Rust, using the Xenia Canary codebase as the primary reference. It is not yet a playable Xbox 360 emulator.
 
-Discussing illegal activities will get you banned.
+## Project goal
 
-## Status
+The goal of **Xenia Rust** is to create a Rust-based implementation of the Xenia Xbox 360 emulator, guided by the behavior, architecture, and compatibility work in the Xenia Canary fork.
 
-Buildbot | Status | Releases
--------- | ------ | --------
-Canary (🪟, 🐧) | [![CI](https://github.com/xenia-canary/xenia-canary/actions/workflows/Orchestrator.yml/badge.svg?branch=canary_experimental)](https://github.com/xenia-canary/xenia-canary/actions/workflows/Orchestrator.yml/badge.svg?branch=canary_experimental) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/cd506034fd8148309a45034925648499)](https://app.codacy.com/gh/xenia-canary/xenia-canary/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) | [Latest](https://github.com/xenia-canary/xenia-canary/releases/latest) ◦ [All](https://github.com/xenia-canary/xenia-canary/releases) ◦ [Old](https://github.com/xenia-canary/xenia-canary-releases/releases)
+This is a substantial reimplementation, not a claim that the existing C++ code has already been converted automatically or that a complete emulator is available today. The original C++ code is retained as reference material while Rust components are developed and validated separately.
 
-### Experimental Netplay
+The long-term objective is to build toward Xbox 360 game execution while preserving correctness, maintainability, clear module boundaries, and a practical testing strategy.
 
-Buildbot | Status | Releases
--------- | ------ | --------
-Windows | [![Codacy Badge](https://app.codacy.com/project/badge/Grade/d814c4b6aa444dcc9c1631e0224b2739)](https://app.codacy.com/gh/AdrianCassar/xenia-canary/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade) | [Latest](https://github.com/AdrianCassar/xenia-canary/releases/latest)
+## Guiding principles
 
-## Quickstart
+- **Use Xenia Canary as the reference:** study its implementation, subsystem boundaries, behavior, and compatibility fixes before reimplementing them.
+- **Rust-first implementation:** new emulator components in the rewrite are implemented in Rust and kept isolated from the original C++ implementation.
+- **Incremental, verifiable progress:** establish a buildable Rust workspace, document dependencies and interfaces, and validate each subsystem as it is introduced.
+- **Compatibility over shortcuts:** use the original implementation and legitimate test cases to guide behavioral parity rather than creating superficial placeholders that imply functionality is complete.
+- **Preserve upstream attribution:** Xenia and Xenia Canary remain the upstream projects and retain their respective licenses and contributions.
 
-See the [Quickstart](https://github.com/xenia-canary/xenia-canary/wiki/Quickstart) page.
+## Current status
 
-## FAQ
+The rewrite is at an early foundation and audit stage. The presence of this repository or its original C++ source does **not** mean that the corresponding functionality has been implemented in Rust.
 
-See the [frequently asked questions](https://github.com/xenia-canary/xenia-canary/wiki/FAQ) page.
+| Area | Current direction |
+|---|---|
+| Repository and architecture audit | Inventory the existing code, subsystems, dependencies, and interfaces |
+| Rust workspace and build foundation | Establish an isolated, testable structure for the rewrite |
+| Memory and guest address handling | Build foundational guest-memory abstractions |
+| PowerPC CPU | Start with an interpreter and incrementally implement instruction behavior |
+| Xbox 360 kernel and system services | Reimplement required operating-system behavior as dependencies become clear |
+| Graphics and GPU | Analyze the graphics pipeline and plan a compatible Rust implementation |
+| Audio, storage, and input | Implement and validate subsystem support progressively |
+| Executable loading and game execution | Integrate only after the required foundations are available |
+| Compatibility and regression testing | Compare behavior against reference implementations and maintain targeted tests |
 
-## Game Compatibility
+**Not implemented yet:** a complete PowerPC CPU, functional Xbox 360 GPU, full kernel/system services, end-to-end game loading, or playable game support. The table describes the intended work, not completed features. Update this section as verified implementation milestones are reached.
 
-See the [Game compatibility list](https://github.com/xenia-canary/game-compatibility/issues)
-for currently tracked games, and feel free to contribute your own updates,
-screenshots, and information there following the [existing conventions](https://github.com/xenia-canary/game-compatibility/blob/canary/README.md).
+## Development approach
 
-## Building
+Work is expected to proceed in stages:
 
-See [building.md](docs/building.md) for setup and information about the
-`xb` script. When writing code, check the [style guide](docs/style_guide.md)
-and be sure to run clang-format!
+1. Audit the Xenia Canary source tree and map its major subsystems, dependencies, and platform-specific code.
+2. Define the Rust workspace, module boundaries, error handling, logging, and test conventions.
+3. Implement foundational types and memory handling, with focused unit tests.
+4. Develop a PowerPC interpreter and validate instruction behavior.
+5. Add the Xbox 360 kernel and system services needed by the execution path.
+6. Develop graphics, audio, input, and storage support.
+7. Integrate executable loading and the runtime, then expand compatibility tests.
+8. Track unsupported behavior explicitly and avoid reporting a game as working until it has been tested.
 
-## Contributors Wanted!
+The order may change when the source audit reveals dependency constraints, but each milestone should be measurable and independently verifiable.
 
-Have some spare time, know advanced C++, and want to write an emulator?
-Contribute! There's a ton of work that needs to be done, a lot of which
-is wide open greenfield fun.
+## Repository structure
 
-**For general rules and guidelines please see [CONTRIBUTING.md](.github/CONTRIBUTING.md).**
+The original Xenia Canary C++ source is preserved as reference material. The Rust rewrite is developed as a separate implementation so that new Rust code, tests, and build configuration can evolve without implying that the legacy code has been ported.
 
-Fixes and optimizations are always welcome (please!), but in addition to
-that there are some major work areas still untouched:
+As the project grows, subsystem-specific documentation should record:
+- the corresponding upstream subsystem or source files;
+- the Rust module responsible for the behavior;
+- known gaps and compatibility differences;
+- tests and evidence used to validate the implementation.
 
-* Help work through [missing functionality/bugs in games](https://github.com/xenia-canary/xenia-canary/labels/compat)
-* Reduce the size of Xenia's [huge log files](https://github.com/xenia-canary/xenia-canary/issues/1526)
-* Skilled with Linux? A strong contributor is needed to [help with porting](https://github.com/xenia-canary/xenia-canary/labels/platform-linux)
+## Building and testing
 
-See more projects [good for contributors](https://github.com/xenia-canary/xenia-canary/labels/good%20first%20issue). It's a good idea to ask on Discord and check the issues page before beginning work on
-something.
+Build instructions will be added and kept aligned with the actual Rust workspace as it becomes buildable. At this stage, do not assume that the repository can build or run a complete Rust emulator.
+
+Once the workspace is established, the expected baseline checks are:
+
+- format Rust code with `cargo fmt --check`;
+- run unit and integration tests with `cargo test --workspace`;
+- run static checks with `cargo clippy --workspace --all-targets`;
+- document any required platform-specific tools and dependencies.
+
+Only claim a check passes after it has actually been run successfully.
+
+## Upstream projects and attribution
+
+This project is based on study and reimplementation of the open-source **Xenia Canary** emulator:
+
+- [Xenia Canary repository](https://github.com/xenia-canary/xenia-canary)
+- [Xenia Canary wiki](https://github.com/xenia-canary/xenia-canary/wiki)
+- [Original Xenia project](https://github.com/xenia-project/xenia)
+
+Xenia Rust is an independent experimental rewrite effort; it is not an official release of Xenia or Xenia Canary and is not affiliated with their maintainers. Existing source files and contributions remain subject to the licenses and notices that apply to them. Consult the repository's license files before redistributing or reusing code.
 
 ## Disclaimer
 
-The goal of this project is to experiment, research, and educate on the topic
-of emulation of modern devices and operating systems. **It is not for enabling
-illegal activity**. All information is obtained via reverse engineering of
-legally purchased devices and games and information made public on the internet
-(you'd be surprised what's indexed on Google...).
+This project is intended for research, education, and experimentation in emulation. Use only games and system materials that you are legally entitled to use, and comply with applicable laws and the licenses of all relevant projects.
