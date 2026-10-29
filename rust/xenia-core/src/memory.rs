@@ -99,6 +99,28 @@ impl GuestMemory {
     }
 }
 
+/// Minimal memory interface used by the interpreter. Implementations can route
+/// accesses through mapped regions or MMIO handlers in later milestones.
+pub trait GuestMemoryAccess {
+    type Error;
+
+    fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error>;
+    fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error>;
+}
+
+impl GuestMemoryAccess for GuestMemory {
+    type Error = MemoryError;
+
+    fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
+        GuestMemory::read_u32_be(self, address)
+    }
+
+    fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
+        GuestMemory::write_u32_be(self, address, value)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::{GuestAddress, GuestMemory, MemoryError};
@@ -174,26 +196,5 @@ mod tests {
         let memory = GuestMemory::new(GuestAddress(0x2000), 7);
         assert_eq!(memory.base(), GuestAddress(0x2000));
         assert_eq!(memory.len(), 7);
-    }
-}
-
-/// Minimal memory interface used by the interpreter. Implementations can route
-/// accesses through mapped regions or MMIO handlers in later milestones.
-pub trait GuestMemoryAccess {
-    type Error;
-
-    fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error>;
-    fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error>;
-}
-
-impl GuestMemoryAccess for GuestMemory {
-    type Error = MemoryError;
-
-    fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
-        GuestMemory::read_u32_be(self, address)
-    }
-
-    fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
-        GuestMemory::write_u32_be(self, address, value)
     }
 }
