@@ -44,3 +44,6 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Smoke-test CLI help
+        run: cargo run --locked -p xenia-rust -- --help
