@@ -28,6 +28,11 @@ impl MemoryPermissions {
         write: false,
         execute: true,
     };
+    pub const READ_WRITE_EXECUTE: Self = Self {
+        read: true,
+        write: true,
+        execute: true,
+    };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -173,6 +178,14 @@ impl crate::memory::GuestMemoryAccess for GuestAddressSpace {
         GuestAddressSpace::read_u32_be(self, address)
     }
 
+    fn fetch_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
+        let region = self.find_region(address)?;
+        if !region.permissions.execute {
+            return Err(AddressSpaceError::PermissionDenied);
+        }
+        Ok(region.memory.read_u32_be(address)?)
+    }
+
     fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
         GuestAddressSpace::write_u32_be(self, address, value)
     }
@@ -205,6 +218,19 @@ mod tests {
             space.map(GuestAddress(0x1080), 0x100, MemoryPermissions::READ_WRITE),
             Err(AddressSpaceError::OverlappingRegion)
         );
+    }
+
+    #[test]
+    fn execute_permission_is_separate_from_read_permission() {
+        let mut space = GuestAddressSpace::new();
+        space
+            .map(GuestAddress(0x1800), 4, MemoryPermissions::READ_ONLY)
+            .unwrap();
+        assert_eq!(
+            crate::memory::GuestMemoryAccess::fetch_u32_be(&space, GuestAddress(0x1800)),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+        assert_eq!(space.read_u32_be(GuestAddress(0x1800)), Ok(0));
     }
 
     #[test]
