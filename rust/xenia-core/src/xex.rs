@@ -97,7 +97,7 @@ fn read_u32_be(bytes: &[u8], offset: usize) -> Result<u32, XexError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_xex2_header, XexError};
+    use super::{XexError, parse_xex2_header};
 
     fn header_with_count(count: u32) -> Vec<u8> {
         let mut bytes = Vec::from(*b"XEX2");
