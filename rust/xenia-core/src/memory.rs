@@ -64,6 +64,27 @@ impl GuestMemory {
         Ok(())
     }
 
+    /// Reads a 32-bit value in the Xbox 360's big-endian byte order.
+    pub fn read_u32_be(&self, address: GuestAddress) -> Result<u32, MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(4).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self.bytes.get(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    /// Writes a 32-bit value in the Xbox 360's big-endian byte order.
+    pub fn write_u32_be(
+        &mut self,
+        address: GuestAddress,
+        value: u32,
+    ) -> Result<(), MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(4).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        bytes.copy_from_slice(&value.to_be_bytes());
+        Ok(())
+    }
+
     fn offset_of(&self, address: GuestAddress) -> Result<usize, MemoryError> {
         let offset = address
             .0
@@ -117,6 +138,29 @@ mod tests {
         assert_eq!(memory.read_u8(GuestAddress(u32::MAX)), Ok(0xCD));
         assert_eq!(
             memory.read_u8(GuestAddress(0)),
+            Err(MemoryError::OutOfBounds)
+        );
+    }
+
+    #[test]
+    fn reads_and_writes_big_endian_words() {
+        let mut memory = GuestMemory::new(GuestAddress(0x3000), 8);
+        memory.write_u32_be(GuestAddress(0x3002), 0x1234_ABCD).unwrap();
+        assert_eq!(memory.read_u32_be(GuestAddress(0x3002)), Ok(0x1234_ABCD));
+        assert_eq!(memory.read_u8(GuestAddress(0x3002)), Ok(0x12));
+        assert_eq!(memory.read_u8(GuestAddress(0x3005)), Ok(0xCD));
+    }
+
+    #[test]
+    fn word_access_rejects_partial_ranges_without_mutating_memory() {
+        let mut memory = GuestMemory::new(GuestAddress(0x4000), 3);
+        assert_eq!(
+            memory.write_u32_be(GuestAddress(0x4000), 0xDEAD_BEEF),
+            Err(MemoryError::OutOfBounds)
+        );
+        assert_eq!(memory.read_u8(GuestAddress(0x4000)), Ok(0));
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x4000)),
             Err(MemoryError::OutOfBounds)
         );
     }
