@@ -5,7 +5,8 @@
 
 use core::cmp::Ordering;
 
-use crate::memory::{GuestAddress, GuestMemory, MemoryError};
+use crate::address_space::{AddressSpaceError, GuestAddressSpace};
+use crate::memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PpcState {
@@ -24,6 +25,7 @@ pub struct PpcState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PpcError {
     Memory(MemoryError),
+    AddressSpace(AddressSpaceError),
     UnsupportedInstruction { pc: u32, opcode: u32 },
     UnsupportedBranchOption { pc: u32, bo: u8 },
 }
@@ -31,6 +33,12 @@ pub enum PpcError {
 impl From<MemoryError> for PpcError {
     fn from(value: MemoryError) -> Self {
         Self::Memory(value)
+    }
+}
+
+impl From<AddressSpaceError> for PpcError {
+    fn from(value: AddressSpaceError) -> Self {
+        Self::AddressSpace(value)
     }
 }
 
@@ -52,9 +60,15 @@ impl PpcInterpreter {
     }
 
     /// Fetches and executes one big-endian 32-bit instruction.
-    pub fn step(&mut self, memory: &mut GuestMemory) -> Result<(), PpcError> {
+    pub fn step<M>(&mut self, memory: &mut M) -> Result<(), PpcError>
+    where
+        M: GuestMemoryAccess,
+        M::Error: Into<PpcError>,
+    {
         let pc = self.state.pc;
-        let instruction = memory.read_u32_be(GuestAddress(pc))?;
+        let instruction = memory
+            .read_u32_be(GuestAddress(pc))
+            .map_err(Into::into)?;
         let opcode = instruction >> 26;
         let rt_rs = ((instruction >> 21) & 0x1F) as usize;
         let ra = ((instruction >> 16) & 0x1F) as usize;
@@ -139,7 +153,9 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                self.state.gpr[rt_rs] = memory.read_u32_be(GuestAddress(address))? as u64;
+                self.state.gpr[rt_rs] = memory
+                    .read_u32_be(GuestAddress(address))
+                    .map_err(Into::into)? as u64;
                 self.state.pc = next_pc;
             }
             // stw RS,D(RA) — store the low 32 bits of RS.
@@ -150,7 +166,9 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                memory.write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)?;
+                memory
+                    .write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)
+                    .map_err(Into::into)?;
                 self.state.pc = next_pc;
             }
             // ori RA,RS,UIMM — destination is RA, source is RS.
@@ -287,6 +305,28 @@ mod tests {
 
         assert_eq!(cpu.state.gpr[4], 0xFEDC_BA98);
         assert_eq!(cpu.state.pc, 0x1008);
+    }
+
+    #[test]
+    fn interpreter_uses_permissioned_address_space() {
+        let mut memory = GuestAddressSpace::new();
+        memory
+            .map(
+                GuestAddress(0x1000),
+                16,
+                crate::address_space::MemoryPermissions::READ_WRITE,
+            )
+            .unwrap();
+        memory
+            .write_u32_be(GuestAddress(0x1000), (14 << 26) | (3 << 21) | 9)
+            .unwrap();
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[3], 9);
+        assert_eq!(cpu.state.pc, 0x1004);
     }
 
     #[test]
