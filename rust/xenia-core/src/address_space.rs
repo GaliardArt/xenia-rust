@@ -273,6 +273,30 @@ mod tests {
     }
 
     #[test]
+    fn protect_and_unmap_change_region_access() {
+        let mut space = GuestAddressSpace::new();
+        space
+            .map(GuestAddress(0x2800), 16, MemoryPermissions::READ_WRITE)
+            .unwrap();
+        space
+            .protect(GuestAddress(0x2800), MemoryPermissions::READ_ONLY)
+            .unwrap();
+        assert_eq!(
+            space.write_u8(GuestAddress(0x2800), 1),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+        space.unmap(GuestAddress(0x2800)).unwrap();
+        assert_eq!(
+            space.read_u8(GuestAddress(0x2800)),
+            Err(AddressSpaceError::UnmappedAddress)
+        );
+        assert_eq!(
+            space.unmap(GuestAddress(0x2800)),
+            Err(AddressSpaceError::RegionNotFound)
+        );
+    }
+
+    #[test]
     fn rejects_empty_and_wrapping_regions() {
         let mut space = GuestAddressSpace::new();
         assert_eq!(
