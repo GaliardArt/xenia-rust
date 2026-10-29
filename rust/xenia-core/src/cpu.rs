@@ -58,8 +58,7 @@ impl PpcInterpreter {
             // addis RT,RA,SI — sign-extended immediate shifted left by 16.
             15 => {
                 let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
-                self.state.gpr[rt_rs] =
-                    base.wrapping_add((immediate << 16) as u64);
+                self.state.gpr[rt_rs] = base.wrapping_add((immediate << 16) as u64);
                 self.state.pc = next_pc;
             }
             // ori RA,RS,UIMM — destination is RA, source is RS.
@@ -128,7 +127,11 @@ mod tests {
     #[test]
     fn ori_uses_rs_as_source_and_ra_as_destination() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
-        put_instruction(&mut memory, 0x1000, (24 << 26) | (4 << 21) | (5 << 16) | 0x00FF);
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (24 << 26) | (4 << 21) | (5 << 16) | 0x00FF,
+        );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[4] = 0x1200;
