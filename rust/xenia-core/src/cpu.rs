@@ -115,8 +115,7 @@ impl PpcInterpreter {
                 let bit = 1 << (3 - (bi % 4));
                 let condition = self.state.cr[field] & bit != 0;
                 let branch_if_true = bo == 12;
-                let displacement =
-                    ((((instruction >> 2) & 0x3FFF) << 2) as u16 as i16) as i32;
+                let displacement = ((((instruction >> 2) & 0x3FFF) << 2) as u16 as i16) as i32;
                 let absolute = instruction & 0x2 != 0;
                 let link = instruction & 1 != 0;
                 if link {
