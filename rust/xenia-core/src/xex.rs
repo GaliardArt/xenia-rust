@@ -72,7 +72,7 @@ pub fn parse_xex2_header(bytes: &[u8]) -> Result<XexHeader, XexError> {
     if table_end > bytes.len() {
         return Err(XexError::OptionalHeaderTableOutOfBounds);
     }
-    if header_size as usize < table_end || header_size as usize > bytes.len() {
+    if (header_size as usize) < table_end || (header_size as usize) > bytes.len() {
         return Err(XexError::InvalidHeaderSize);
     }
 
