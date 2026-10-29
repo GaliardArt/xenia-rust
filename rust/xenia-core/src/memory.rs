@@ -79,7 +79,10 @@ impl GuestMemory {
     pub fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
         let end = offset.checked_add(4).ok_or(MemoryError::OutOfBounds)?;
-        let bytes = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self
+            .bytes
+            .get_mut(offset..end)
+            .ok_or(MemoryError::OutOfBounds)?;
         bytes.copy_from_slice(&value.to_be_bytes());
         Ok(())
     }
