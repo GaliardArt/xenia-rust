@@ -1,0 +1,17 @@
+[package]
+name = "xenia-rust"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Experimental command-line shell for the Rust Xenia rewrite"
+
+[[bin]]
+name = "xenia-rust"
+path = "src/main.rs"
+
+[dependencies]
+xenia-core = { path = "../xenia-core" }
+
+[lints]
+workspace = true

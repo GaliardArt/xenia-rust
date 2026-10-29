@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["rust/xenia-core", "rust/xenia-cli"]
+
+[workspace.package]
+edition = "2024"
+license = "BSD-3-Clause"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
