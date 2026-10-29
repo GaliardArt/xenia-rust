@@ -121,11 +121,7 @@ impl GuestAddressSpace {
         Ok(region.memory.read_u8(address)?)
     }
 
-    pub fn write_u8(
-        &mut self,
-        address: GuestAddress,
-        value: u8,
-    ) -> Result<(), AddressSpaceError> {
+    pub fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), AddressSpaceError> {
         let region = self.find_region_mut(address)?;
         if !region.permissions.write {
             return Err(AddressSpaceError::PermissionDenied);
@@ -162,10 +158,7 @@ impl GuestAddressSpace {
             .ok_or(AddressSpaceError::UnmappedAddress)
     }
 
-    fn find_region_mut(
-        &mut self,
-        address: GuestAddress,
-    ) -> Result<&mut Region, AddressSpaceError> {
+    fn find_region_mut(&mut self, address: GuestAddress) -> Result<&mut Region, AddressSpaceError> {
         self.regions
             .iter_mut()
             .find(|region| region.contains(address))
