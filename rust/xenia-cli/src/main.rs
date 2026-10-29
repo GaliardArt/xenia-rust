@@ -29,7 +29,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             let header = parse_xex2_header(&bytes)?;
             println!("XEX2 header: {path}");
             println!("  module flags:        0x{:08X}", header.module_flags);
-            println!("  PE data offset:      0x{:08X}", header.pe_data_offset);
+            println!("  header size:         0x{:08X}", header.header_size);
             println!("  reserved:            0x{:08X}", header.reserved);
             println!(
                 "  security info offset: 0x{:08X}",
