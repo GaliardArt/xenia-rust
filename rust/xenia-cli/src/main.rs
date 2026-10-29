@@ -16,15 +16,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
         Some("inspect-xex") => {
-            let path = args.next().ok_or_else(|| {
-                io::Error::new(ErrorKind::InvalidInput, "missing XEX file path")
-            })?;
+            let path = args
+                .next()
+                .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "missing XEX file path"))?;
             if args.next().is_some() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "unexpected extra arguments",
-                )
-                .into());
+                return Err(
+                    io::Error::new(ErrorKind::InvalidInput, "unexpected extra arguments").into(),
+                );
             }
 
             let bytes = fs::read(&path)?;
@@ -59,7 +57,9 @@ fn run() -> Result<(), Box<dyn Error>> {
             println!("  xenia-rust --version");
             println!("  xenia-rust --help");
             println!();
-            println!("The current build can inspect XEX2 header metadata only; it cannot run games.");
+            println!(
+                "The current build can inspect XEX2 header metadata only; it cannot run games."
+            );
             Ok(())
         }
         Some(command) => Err(io::Error::new(
