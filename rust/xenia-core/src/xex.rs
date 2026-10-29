@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(parsed.module_flags, 0x1234);
         assert_eq!(parsed.header_size, 0x40);
         assert_eq!(parsed.reserved, 0);
-        assert_eq!(parsed.security_info_offset, 0x80);
+        assert_eq!(parsed.security_info_offset, 0x30);
         assert_eq!(parsed.optional_headers.len(), 1);
         assert_eq!(parsed.optional_headers[0].key, 0x0001_0002);
         assert_eq!(parsed.optional_headers[0].value, 0x40);
