@@ -32,7 +32,7 @@ Areas requiring a detailed audit:
 - src/xenia/hid, src/xenia/vfs, executable loading, UI, configuration, and platform integration.
 - third_party and Git submodules: dependency and license inventory.
 
-See [Technical Audit — Phase 1](TECHNICAL_AUDIT_PHASE_1.md) for source-based findings.
+See [Technical Audit — Phase 1](TECHNICAL_AUDIT_PHASE_1.md) for source-based findings and [XEX Loader Contract](XEX_LOADER_CONTRACT.md) for the verified container layout and safe loading stages.
 The audit is preliminary: only a sample of files has been compared against upstream,
 and the full repository delta remains open.
 
@@ -103,7 +103,7 @@ address space with protect/unmap operations; a memory-access interface shared by
 CPU and memory models, including execute-permission checks for instruction fetch; a
 deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
 beq/bne forms, lwz and stw); and a defensive XEX2 fixed-header/optional-header
-parser. The CLI can inspect XEX2 metadata. Unsupported CPU opcodes fail explicitly.
+parser that validates the declared header size. The CLI can inspect XEX2 metadata. Unsupported CPU opcodes fail explicitly.
 This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
 page-level permissions, decryption/decompression, PE section mapping, kernel
 services, concurrency, most PPC instructions and exception semantics remain
