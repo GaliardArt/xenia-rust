@@ -54,7 +54,7 @@ The pipeline is staged and must not be collapsed into a single unchecked parse:
 
 - **LDR-1 (current):** fixed XEX2 header and optional-header table parsing, malformed-input tests, CLI metadata inspection.
 - **LDR-2:** optional-header lookup and safe security-info parsing, including page descriptor bounds.
-- **LDR-3:** PE header parser for the Xbox 360 PPCBE/32-bit/Xbox-subsystem profile, with malformed-section tests.
+- **LDR-3 (in progress):** PE header parser for the Xbox 360 PPCBE/32-bit/Xbox-subsystem profile and section-table parsing with malformed-input tests. This is metadata-only; it does not map section data.
 - **LDR-4:** image layout plan that computes all mapped ranges and protections without mutating memory.
 - **LDR-5:** uncompressed, unencrypted XEX image path for controlled fixtures.
 - **LDR-6:** compression and encryption paths, then imports, patches, and boot integration.
