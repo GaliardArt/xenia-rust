@@ -3,6 +3,8 @@
 //! Only a deliberately small instruction subset is implemented. This is not
 //! sufficient to boot an Xbox 360 title; unsupported instructions fail loudly.
 
+use core::cmp::Ordering;
+
 use crate::memory::{GuestAddress, GuestMemory, MemoryError};
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -23,6 +25,7 @@ pub struct PpcState {
 pub enum PpcError {
     Memory(MemoryError),
     UnsupportedInstruction { pc: u32, opcode: u32 },
+    UnsupportedBranchOption { pc: u32, bo: u8 },
 }
 
 impl From<MemoryError> for PpcError {
@@ -38,6 +41,16 @@ pub struct PpcInterpreter {
 }
 
 impl PpcInterpreter {
+    fn set_cr_field(&mut self, field: usize, ordering: Ordering) {
+        let result = match ordering {
+            Ordering::Less => 0b1000,
+            Ordering::Greater => 0b0100,
+            Ordering::Equal => 0b0010,
+        };
+        let summary_overflow = ((self.state.xer >> 31) & 1) as u8;
+        self.state.cr[field] = result | summary_overflow;
+    }
+
     /// Fetches and executes one big-endian 32-bit instruction.
     pub fn step(&mut self, memory: &mut GuestMemory) -> Result<(), PpcError> {
         let pc = self.state.pc;
@@ -60,6 +73,64 @@ impl PpcInterpreter {
                 let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
                 self.state.gpr[rt_rs] = base.wrapping_add((immediate << 16) as u64);
                 self.state.pc = next_pc;
+            }
+            // cmpwi BF,RA,SI — compare signed word or doubleword.
+            11 => {
+                let field = ((instruction >> 23) & 0x7) as usize;
+                let is_64_bit = instruction & (1 << 21) != 0;
+                let left = if is_64_bit {
+                    self.state.gpr[ra] as i64
+                } else {
+                    self.state.gpr[ra] as u32 as i32 as i64
+                };
+                let right = if is_64_bit {
+                    immediate
+                } else {
+                    immediate as i32 as i64
+                };
+                self.set_cr_field(field, left.cmp(&right));
+                self.state.pc = next_pc;
+            }
+            // cmplwi BF,RA,UI — compare unsigned word or doubleword.
+            10 => {
+                let field = ((instruction >> 23) & 0x7) as usize;
+                let is_64_bit = instruction & (1 << 21) != 0;
+                let left = if is_64_bit {
+                    self.state.gpr[ra]
+                } else {
+                    self.state.gpr[ra] as u32 as u64
+                };
+                let right = (instruction & 0xFFFF) as u64;
+                self.set_cr_field(field, left.cmp(&right));
+                self.state.pc = next_pc;
+            }
+            // bc BO,BI,BD,AA,LK — initial support for CR-only beq/bne forms.
+            16 => {
+                let bo = ((instruction >> 21) & 0x1F) as u8;
+                if bo != 4 && bo != 12 {
+                    return Err(PpcError::UnsupportedBranchOption { pc, bo });
+                }
+                let bi = ((instruction >> 16) & 0x1F) as usize;
+                let field = bi / 4;
+                let bit = 1 << (3 - (bi % 4));
+                let condition = self.state.cr[field] & bit != 0;
+                let branch_if_true = bo == 12;
+                let displacement =
+                    ((((instruction >> 2) & 0x3FFF) << 2) as u16 as i16) as i32;
+                let absolute = instruction & 0x2 != 0;
+                let link = instruction & 1 != 0;
+                if link {
+                    self.state.lr = next_pc as u64;
+                }
+                if condition == branch_if_true {
+                    self.state.pc = if absolute {
+                        displacement as u32
+                    } else {
+                        pc.wrapping_add(displacement as u32)
+                    };
+                } else {
+                    self.state.pc = next_pc;
+                }
             }
             // lwz RT,D(RA) — load a zero-extended 32-bit word.
             32 => {
@@ -176,6 +247,28 @@ mod tests {
 
         assert_eq!(cpu.state.pc, 0x1008);
         assert_eq!(cpu.state.lr, 0x1004);
+    }
+
+    #[test]
+    fn cmpwi_sets_equal_condition_and_beq_branches() {
+        let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
+        // cmpwi cr0,r3,7
+        put_instruction(&mut memory, 0x1000, (11 << 26) | (3 << 16) | 7);
+        // beq cr0,+8: BO=12, BI=2
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (16 << 26) | (12 << 21) | (2 << 16) | (2 << 2),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 7;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[0] & 0x0E, 0b0010);
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.pc, 0x100C);
     }
 
     #[test]
