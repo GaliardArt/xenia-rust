@@ -461,11 +461,17 @@ impl PpcInterpreter {
                         if update && (ra == 0 || ra == rt_rs) {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let value = if extended_opcode == 535 || extended_opcode == 567 {
                             f32::from_bits(
-                                memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?,
+                                memory
+                                    .read_u32_be(GuestAddress(address))
+                                    .map_err(Into::into)?,
                             ) as f64
                         } else {
                             let high = memory
@@ -501,10 +507,7 @@ impl PpcInterpreter {
                                 .write_u32_be(GuestAddress(address), (bits >> 32) as u32)
                                 .map_err(Into::into)?;
                             memory
-                                .write_u32_be(
-                                    GuestAddress(address.wrapping_add(4)),
-                                    bits as u32,
-                                )
+                                .write_u32_be(GuestAddress(address.wrapping_add(4)), bits as u32)
                                 .map_err(Into::into)?;
                         }
                         if update {
