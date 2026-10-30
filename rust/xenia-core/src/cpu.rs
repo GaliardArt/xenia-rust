@@ -5832,14 +5832,16 @@ mod tests {
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (178 << 1));
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
-        cpu.state.gpr[3] =
-            PPC_MSR_FE0 | PPC_MSR_FE1 | (1 << 62) | (1 << 14);
+        cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1 | (1 << 62) | (1 << 14);
         cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // FEX + ZX + ZE
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.msr, 0xC000_0000_0000_C930); // Xenon mtmsrd L=0 aliases
-        assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
+        assert_eq!(
+            cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1),
+            PPC_MSR_FE0 | PPC_MSR_FE1
+        );
         assert!(matches!(
             cpu.pending_exception(),
             Some(PpcException::FloatingPointEnableTransition {
@@ -5869,6 +5871,4 @@ mod tests {
         assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1 | 0x9236);
         assert_eq!(cpu.state.pc, 0x1004);
     }
-
-
 }
