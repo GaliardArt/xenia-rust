@@ -331,11 +331,7 @@ mod tests {
     fn bdnz_decrements_ctr_and_branches_until_zero() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // bdnz +8 (BO=16, BI ignored)
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (16 << 26) | (16 << 21) | (2 << 2),
-        );
+        put_instruction(&mut memory, 0x1000, (16 << 26) | (16 << 21) | (2 << 2));
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.ctr = 2;
@@ -354,11 +350,7 @@ mod tests {
     fn bclr_branches_to_aligned_lr_and_sets_link_after_target_capture() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // bclrl with BO=20 (ignore CR and CTR), XO=16.
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (19 << 26) | (20 << 21) | (16 << 1) | 1,
-        );
+        put_instruction(&mut memory, 0x1000, (19 << 26) | (20 << 21) | (16 << 1) | 1);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.lr = 0x1237;
