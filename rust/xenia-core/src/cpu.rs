@@ -170,17 +170,11 @@ impl PpcInterpreter {
         record: bool,
     ) {
         const FX: u32 = 1 << 31;
-        const FEX: u32 = 1 << 30;
         const VX: u32 = 1 << 29;
         const OX: u32 = 1 << 28;
         const UX: u32 = 1 << 27;
         const ZX: u32 = 1 << 26;
         const XX: u32 = 1 << 25;
-        const VE: u32 = 1 << 7;
-        const OE: u32 = 1 << 6;
-        const UE: u32 = 1 << 5;
-        const ZE: u32 = 1 << 4;
-        const XE: u32 = 1 << 3;
 
         let mut raised = 0;
         if invalid {
@@ -207,7 +201,13 @@ impl PpcInterpreter {
         }
     }
 
-    fn update_fpscr_for_result(&mut self, value: f64, operands: &[f64], record: bool) {
+    fn update_fpscr_for_result(
+        &mut self,
+        value: f64,
+        operands: &[f64],
+        inexact: bool,
+        record: bool,
+    ) {
         let invalid = value.is_nan() && !operands.iter().any(|operand| operand.is_nan());
         let div_zero = operands.len() >= 2
             && operands[1] == 0.0
@@ -217,7 +217,7 @@ impl PpcInterpreter {
             && !div_zero
             && operands.iter().all(|operand| operand.is_finite());
         let underflow = value != 0.0 && value.is_subnormal();
-        self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, false, record);
+        self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, inexact, record);
     }
 
     fn fpscr_rounding_mode(&self) -> u32 {
@@ -1181,7 +1181,10 @@ impl PpcInterpreter {
                     72 => b,                 // fmr
                     136 => -b.abs(),         // fnabs
                     40 => -b,                // fneg
-                    12 => (b as f32) as f64, // frsp
+                    12 => {
+                        update_status = true;
+                        (b as f32) as f64
+                    } // frsp
                     14 | 15 | 814 | 815 => {
                         // fctiw/z and fctid/z
                         let rounded = if xo10 == 15 || xo10 == 815 {
@@ -1194,6 +1197,7 @@ impl PpcInterpreter {
                         } else {
                             (i64::MIN as f64, 9_223_372_036_854_775_808.0)
                         };
+                        update_status = true;
                         if !rounded.is_finite()
                             || rounded < min
                             || rounded >= max_exclusive
@@ -1210,7 +1214,10 @@ impl PpcInterpreter {
                             (rounded as i64) as f64
                         }
                     }
-                    846 => (b as i64) as f64, // fcfid
+                    846 => {
+                        update_status = true;
+                        (b as i64) as f64
+                    } // fcfid
                     _ => {
                         arithmetic = true;
                         update_status = true;
@@ -1252,7 +1259,7 @@ impl PpcInterpreter {
                             29..=31 => &[a, b, c],
                             _ => &[a, b],
                         };
-                        self.update_fpscr_for_result(rounded, operands, record);
+                        self.update_fpscr_for_result(rounded, operands, rounded != value, record);
                     }
                 } else {
                     self.state.fpr[frt] = value;
@@ -1265,7 +1272,8 @@ impl PpcInterpreter {
                             29..=31 => &[a, b, c],
                             _ => &[a, b],
                         };
-                        self.update_fpscr_for_result(value, operands, record);
+                        let inexact = xo10 == 12 && value != b;
+                        self.update_fpscr_for_result(value, operands, inexact, record);
                     } else if record {
                         self.copy_fpscr_to_cr1();
                     }
