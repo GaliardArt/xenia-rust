@@ -210,7 +210,8 @@ impl PpcInterpreter {
                 } else {
                     (instruction >> 11) & 0x1F
                 };
-                let mask = Self::rotate_mask32((instruction >> 6) & 0x1F, (instruction >> 1) & 0x1F);
+                let mask =
+                    Self::rotate_mask32((instruction >> 6) & 0x1F, (instruction >> 1) & 0x1F);
                 let rotated = (self.state.gpr[rt_rs] as u32).rotate_left(shift);
                 let value = if opcode == 20 {
                     ((self.state.gpr[ra] as u32) & !mask) | (rotated & mask)
@@ -506,14 +507,34 @@ impl PpcInterpreter {
                             (right as u32) & 0x3F
                         };
                         let value = match xo {
-                            24 => if shift > 31 { 0 } else { (left as u32).wrapping_shl(shift) },
-                            536 => if shift > 31 { 0 } else { (left as u32) >> shift },
-                            792 => if shift > 31 {
-                                if source < 0 { u32::MAX } else { 0 }
-                            } else {
-                                (source >> shift) as u32
-                            },
-                            824 => if shift == 0 { left as u32 } else { (source >> shift) as u32 },
+                            24 => {
+                                if shift > 31 {
+                                    0
+                                } else {
+                                    (left as u32).wrapping_shl(shift)
+                                }
+                            }
+                            536 => {
+                                if shift > 31 {
+                                    0
+                                } else {
+                                    (left as u32) >> shift
+                                }
+                            }
+                            792 => {
+                                if shift > 31 {
+                                    if source < 0 { u32::MAX } else { 0 }
+                                } else {
+                                    (source >> shift) as u32
+                                }
+                            }
+                            824 => {
+                                if shift == 0 {
+                                    left as u32
+                                } else {
+                                    (source >> shift) as u32
+                                }
+                            }
                             _ => unreachable!(),
                         };
                         if extended_opcode == 792 || extended_opcode == 824 {
@@ -525,7 +546,9 @@ impl PpcInterpreter {
                             self.set_carry(source < 0 && shifted_out);
                         }
                         self.state.gpr[rt_rs] = value as u64;
-                        if record { self.set_cr_field(0, (value as i32).cmp(&0)); }
+                        if record {
+                            self.set_cr_field(0, (value as i32).cmp(&0));
+                        }
                     }
                     26 | 58 | 954 | 922 | 986 => {
                         let value = match extended_opcode {
@@ -537,7 +560,9 @@ impl PpcInterpreter {
                             _ => unreachable!(),
                         };
                         self.state.gpr[rt_rs] = value;
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     28 | 60 | 124 | 284 | 316 | 412 | 444 | 476 => {
                         let value = match extended_opcode {
