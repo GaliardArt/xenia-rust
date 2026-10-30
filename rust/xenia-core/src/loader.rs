@@ -113,6 +113,9 @@ pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadErr
     if bytes.get(file_format_offset..info_end).is_none() {
         return Err(XexLoadError::FileFormatHeaderOutOfBounds);
     }
+    if info_end > header.header_size as usize {
+        return Err(XexLoadError::InvalidFileFormatHeaderSize);
+    }
 
     let encryption_type = read_u16_be(file_format, 4);
     let compression_type = read_u16_be(file_format, 6);
@@ -208,11 +211,11 @@ mod tests {
 
     fn valid_xex() -> Vec<u8> {
         let payload = valid_pe();
-        let header_size = 0x40;
         let security_offset = 0x40;
         let security_size = 0x184;
         let format_offset = security_offset + security_size;
         let format_size = 8;
+        let header_size = format_offset + format_size;
         let image_offset = header_size;
         let mut bytes = vec![0; image_offset + payload.len()];
 
