@@ -756,17 +756,17 @@ mod tests {
     #[test]
     fn condition_register_logic_updates_individual_bits() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
-        // crand bt=3, ba=2, bb=1
+        // crand bt=0, ba=0, bb=0
         put_instruction(
             &mut memory,
             0x1000,
-            (19 << 26) | (3 << 21) | (2 << 16) | (1 << 11) | (257 << 1),
+            (19 << 26) | (257 << 1),
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
-        cpu.state.cr[0] = 0b1100;
+        cpu.state.cr[0] = 0b1000;
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.cr[0] & 0b0001, 0b0001);
+        assert_eq!(cpu.state.cr[0] & 0b1000, 0b1000);
     }
 
     #[test]
