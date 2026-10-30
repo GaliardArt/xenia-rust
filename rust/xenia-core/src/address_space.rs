@@ -255,6 +255,14 @@ impl GuestAddressSpace {
 impl crate::memory::GuestMemoryAccess for GuestAddressSpace {
     type Error = AddressSpaceError;
 
+    fn read_u8(&self, address: GuestAddress) -> Result<u8, Self::Error> {
+        GuestAddressSpace::read_u8(self, address)
+    }
+
+    fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error> {
+        GuestAddressSpace::write_u8(self, address, value)
+    }
+
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
         GuestAddressSpace::read_u32_be(self, address)
     }
