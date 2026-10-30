@@ -4970,7 +4970,7 @@ mod tests {
                 mode: PpcFpExceptionMode::Precise,
             })
         );
-        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsfi
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // mtfsfi does not implicitly set FX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX derived after VE is enabled
     }
 
@@ -4998,7 +4998,7 @@ mod tests {
                 mode: PpcFpExceptionMode::Precise,
             })
         );
-        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsf
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // mtfsf explicitly supplied FX=0
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX recomputed from VX + VE
     }
 
