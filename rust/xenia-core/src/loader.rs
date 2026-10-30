@@ -492,7 +492,7 @@ mod tests {
             format_offset + 12,
             0x2000 - payload.len() as u32,
         );
-        bytes[header_size..].copy_from_slice(&payload);
+        bytes[header_size..header_size + payload.len()].copy_from_slice(&payload);
         bytes
     }
 
@@ -618,7 +618,7 @@ mod tests {
     #[test]
     fn rejects_encrypted_or_compressed_images() {
         let mut encrypted = valid_xex();
-        let format_offset = 0x40 + 0x184;
+        let format_offset = 0x40 + 0x184 + 0x18;
         put_u16_be(&mut encrypted, format_offset + 4, 1);
         assert_eq!(
             load_xex2_image(&encrypted),
