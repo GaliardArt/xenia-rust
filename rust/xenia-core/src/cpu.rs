@@ -1369,9 +1369,7 @@ mod tests {
     #[test]
     fn addme_addze_subfme_and_subfze_use_xer_carry() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
-        let encode = |rt: u32, ra: u32, xo: u32| {
-            (31 << 26) | (rt << 21) | (ra << 16) | (xo << 1)
-        };
+        let encode = |rt: u32, ra: u32, xo: u32| (31 << 26) | (rt << 21) | (ra << 16) | (xo << 1);
         put_instruction(&mut memory, 0x1000, encode(5, 3, 234)); // addme r5,r3
         put_instruction(&mut memory, 0x1004, encode(6, 3, 202)); // addze r6,r3
         put_instruction(&mut memory, 0x1008, encode(7, 3, 232)); // subfme r7,r3
