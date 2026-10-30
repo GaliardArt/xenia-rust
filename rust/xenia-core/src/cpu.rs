@@ -202,10 +202,7 @@ impl PpcInterpreter {
     /// Executes one instruction and automatically enters the Program Exception
     /// vector when an FP exception reaches its architectural delivery boundary.
     /// Returns the delivered exception so the host can log or inspect it.
-    pub fn step_and_dispatch<M>(
-        &mut self,
-        memory: &mut M,
-    ) -> Result<Option<PpcException>, PpcError>
+    pub fn step_and_dispatch<M>(&mut self, memory: &mut M) -> Result<Option<PpcException>, PpcError>
     where
         M: GuestMemoryAccess,
         M::Error: Into<PpcError>,
@@ -5585,7 +5582,10 @@ mod tests {
             );
             assert_eq!(cpu.state.pc, 0x1000);
             assert_eq!(cpu.state.fpscr, original_fpscr);
-            assert_eq!(cpu.state.fpr.map(|value| value.to_bits()), original_fpr_bits);
+            assert_eq!(
+                cpu.state.fpr.map(|value| value.to_bits()),
+                original_fpr_bits
+            );
             assert_eq!(cpu.state.cr, original_cr);
             assert_eq!(cpu.pending_exception(), Some(pending));
         }
@@ -5795,5 +5795,4 @@ mod tests {
         assert_eq!(cpu.state.srr0, 0x1000);
         assert_eq!(cpu.state.gpr[4], 0);
     }
-
 }
