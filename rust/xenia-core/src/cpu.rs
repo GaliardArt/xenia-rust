@@ -2309,11 +2309,7 @@ impl PpcInterpreter {
                         };
                         let adjusted = overflow_enabled || underflow_enabled;
                         let mut rounded = if adjusted {
-                            let scaled = self.round_to_single_significand(adjusted_value);
-                            Self::scale_by_power_of_two(
-                                scaled,
-                                if overflow_enabled { 192 } else { -192 },
-                            )
+                            self.round_to_single_significand(adjusted_value)
                         } else {
                             self.round_to_single(b)
                         };
@@ -2330,7 +2326,7 @@ impl PpcInterpreter {
                         }
                         frsp_inexact = ni_flush
                             || if adjusted {
-                                rounded != b
+                                rounded != adjusted_value
                             } else {
                                 (b.is_finite() && rounded.is_finite() && rounded != b)
                                     || (frsp_overflow && !overflow_enabled)
@@ -2338,7 +2334,7 @@ impl PpcInterpreter {
                         frsp_underflow = tiny && (underflow_enabled || frsp_inexact);
                         frsp_fraction_rounded = !frsp_overflow
                             && if adjusted {
-                                rounded.abs() > b.abs()
+                                rounded.abs() > adjusted_value.abs()
                             } else {
                                 frsp_inexact && b.is_finite() && rounded.abs() > b.abs()
                             };
@@ -2514,11 +2510,7 @@ impl PpcInterpreter {
                     };
                     let adjusted_exponent = overflow_enabled || underflow_enabled;
                     let mut rounded = if adjusted_exponent {
-                        let scaled = self.round_to_single_significand(adjusted_value);
-                        Self::scale_by_power_of_two(
-                            scaled,
-                            if overflow_enabled { 192 } else { -192 },
-                        )
+                        self.round_to_single_significand(adjusted_value)
                     } else {
                         self.round_to_single(value)
                     };
@@ -2538,7 +2530,7 @@ impl PpcInterpreter {
                     if update_status {
                         let inexact = ni_flush
                             || if adjusted_exponent {
-                                rounded != value
+                                rounded != adjusted_value
                             } else {
                                 (value.is_finite() && rounded.is_finite() && rounded != value)
                                     || (overflow && !overflow_enabled)
@@ -2546,7 +2538,7 @@ impl PpcInterpreter {
                         let fraction_rounded = if overflow {
                             false
                         } else if adjusted_exponent {
-                            rounded.abs() > value.abs()
+                            rounded.abs() > adjusted_value.abs()
                         } else {
                             (value.is_finite() && rounded.abs() > value.abs())
                                 || (value.is_infinite()
@@ -5017,11 +5009,9 @@ mod tests {
                 mode: PpcFpExceptionMode::Precise,
             })
         );
-        assert_eq!(
-            cpu.state.fpr[1].to_bits(),
-            (f32::from_bits(1) as f64).to_bits()
-        );
+        assert_eq!(cpu.state.fpr[1], 2.0_f64.powi(43)); // enabled underflow adjusts exponent by +192
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // enabled underflow: UX
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // adjusted positive normal
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
     }
 
