@@ -4686,4 +4686,33 @@ mod tests {
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // sticky VX still records
     }
 
+    #[test]
+    fn enabled_inexact_single_precision_emits_guest_exception_event() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 2.0_f64.powi(-24);
+        cpu.state.fpscr = 1 << 3; // XE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 1.0); // tie rounds to even
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1000,
+                causes: 1 << 25, // XX
+            })
+        );
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+    }
+
 }
