@@ -489,13 +489,11 @@ impl PpcInterpreter {
                                     .map_err(Into::into)?,
                             ) as f64
                         } else {
-                            let high = memory
-                                .read_u32_be(GuestAddress(address))
-                                .map_err(Into::into)?;
-                            let low = memory
-                                .read_u32_be(GuestAddress(address.wrapping_add(4)))
-                                .map_err(Into::into)?;
-                            f64::from_bits(((high as u64) << 32) | low as u64)
+                            f64::from_bits(
+                                memory
+                                    .read_u64_be(GuestAddress(address))
+                                    .map_err(Into::into)?,
+                            )
                         };
                         self.state.fpr[rt_rs] = value;
                         if update {
@@ -521,12 +519,11 @@ impl PpcInterpreter {
                                 )
                                 .map_err(Into::into)?;
                         } else {
-                            let bits = self.state.fpr[rt_rs].to_bits();
                             memory
-                                .write_u32_be(GuestAddress(address), (bits >> 32) as u32)
-                                .map_err(Into::into)?;
-                            memory
-                                .write_u32_be(GuestAddress(address.wrapping_add(4)), bits as u32)
+                                .write_u64_be(
+                                    GuestAddress(address),
+                                    self.state.fpr[rt_rs].to_bits(),
+                                )
                                 .map_err(Into::into)?;
                         }
                         if update {
@@ -818,15 +815,11 @@ impl PpcInterpreter {
                             .read_u32_be(GuestAddress(address))
                             .map_err(Into::into)?,
                     ) as f64,
-                    50 | 51 => {
-                        let high = memory
-                            .read_u32_be(GuestAddress(address))
-                            .map_err(Into::into)?;
-                        let low = memory
-                            .read_u32_be(GuestAddress(address.wrapping_add(4)))
-                            .map_err(Into::into)?;
-                        f64::from_bits(((high as u64) << 32) | low as u64)
-                    }
+                    50 | 51 => f64::from_bits(
+                        memory
+                            .read_u64_be(GuestAddress(address))
+                            .map_err(Into::into)?,
+                    )
                     _ => unreachable!(),
                 };
                 self.state.fpr[rt_rs] = value;
@@ -856,10 +849,7 @@ impl PpcInterpreter {
                         .map_err(Into::into)?;
                 } else {
                     memory
-                        .write_u32_be(GuestAddress(address), (bits >> 32) as u32)
-                        .map_err(Into::into)?;
-                    memory
-                        .write_u32_be(GuestAddress(address.wrapping_add(4)), bits as u32)
+                        .write_u64_be(GuestAddress(address), bits)
                         .map_err(Into::into)?;
                 }
                 if update {
