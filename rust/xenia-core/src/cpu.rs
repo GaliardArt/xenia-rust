@@ -2098,8 +2098,9 @@ impl PpcInterpreter {
 
                 if xo10 == 583 {
                     // mffs
-                    self.state.fpr[frt] =
-                        f64::from_bits(0xFFF8_0000_0000_0000 | self.state.fpscr as u64);
+                    // Xenia's Xenon execution model zero-extends the
+                    // 32-bit FPSCR payload into the 64-bit FPR container.
+                    self.state.fpr[frt] = self.state.fpscr as f64;
                     if record {
                         self.copy_fpscr_to_cr1();
                     }
@@ -3538,7 +3539,7 @@ mod tests {
         cpu.state.fpscr = 0xA123_4567;
 
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.fpr[1].to_bits(), 0xFFF8_0000_A123_4567);
+        assert_eq!(cpu.state.fpr[1].to_bits(), 0x0000_0000_A123_4567);
         cpu.state.fpscr = 0;
 
         cpu.step(&mut memory).unwrap();
