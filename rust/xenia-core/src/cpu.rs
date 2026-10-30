@@ -279,6 +279,7 @@ impl PpcInterpreter {
         inexact: bool,
         fraction_rounded: bool,
         overflow: bool,
+        underflow: bool,
         single_precision: bool,
         record: bool,
     ) -> bool {
@@ -356,22 +357,27 @@ impl PpcInterpreter {
         let overflow = !div_zero
             && operands.iter().all(|operand| operand.is_finite())
             && (overflow || value.is_infinite());
-        let underflow = (value == 0.0 || value.is_subnormal()) && inexact;
+        let underflow = underflow && !div_zero;
         let invalid_enabled = invalid && self.state.fpscr & (1 << 7) != 0;
         let div_zero_enabled = div_zero && self.state.fpscr & (1 << 4) != 0;
+        let overflow_enabled = overflow && self.state.fpscr & (1 << 6) != 0;
         if !invalid_enabled && !div_zero_enabled {
             self.set_fprf_for_value_precision(value, single_precision);
         }
-        let update_rounding = operation != 26 || invalid || div_zero;
+        let update_rounding = operation != 26 || invalid || div_zero || overflow || underflow;
         self.update_fpscr_exceptions(
             FpExceptionFlags {
                 invalid,
                 div_zero,
                 overflow,
                 underflow,
-                inexact: inexact || overflow,
-                raise_inexact: update_rounding && (inexact || overflow || underflow),
-                fraction_rounded,
+                inexact: if overflow { !overflow_enabled } else { inexact },
+                raise_inexact: if overflow && !overflow_enabled {
+                    true
+                } else {
+                    inexact
+                },
+                fraction_rounded: fraction_rounded && !overflow,
                 update_rounding,
                 invalid_cause,
             },
