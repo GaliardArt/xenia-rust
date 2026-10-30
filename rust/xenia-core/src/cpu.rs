@@ -135,6 +135,31 @@ impl PpcInterpreter {
         self.state.cr[1] = ((self.state.fpscr >> 28) & 0x0F) as u8;
     }
 
+    fn refresh_fpscr_fex(&mut self) {
+        const FEX: u32 = 1 << 30;
+        const VX: u32 = 1 << 29;
+        const OX: u32 = 1 << 28;
+        const UX: u32 = 1 << 27;
+        const ZX: u32 = 1 << 26;
+        const XX: u32 = 1 << 25;
+        const VE: u32 = 1 << 7;
+        const OE: u32 = 1 << 6;
+        const UE: u32 = 1 << 5;
+        const ZE: u32 = 1 << 4;
+        const XE: u32 = 1 << 3;
+
+        let enabled = (self.state.fpscr & VX != 0 && self.state.fpscr & VE != 0)
+            || (self.state.fpscr & OX != 0 && self.state.fpscr & OE != 0)
+            || (self.state.fpscr & UX != 0 && self.state.fpscr & UE != 0)
+            || (self.state.fpscr & ZX != 0 && self.state.fpscr & ZE != 0)
+            || (self.state.fpscr & XX != 0 && self.state.fpscr & XE != 0);
+        if enabled {
+            self.state.fpscr |= FEX;
+        } else {
+            self.state.fpscr &= !FEX;
+        }
+    }
+
     fn update_fpscr_exceptions(
         &mut self,
         invalid: bool,
@@ -176,17 +201,7 @@ impl PpcInterpreter {
         if raised != 0 {
             self.state.fpscr |= FX | raised;
         }
-        // FEX is derived from sticky exception status bits and their enables.
-        let enabled = ((self.state.fpscr & VX != 0 && self.state.fpscr & VE != 0)
-            || (self.state.fpscr & OX != 0 && self.state.fpscr & OE != 0)
-            || (self.state.fpscr & UX != 0 && self.state.fpscr & UE != 0)
-            || (self.state.fpscr & ZX != 0 && self.state.fpscr & ZE != 0)
-            || (self.state.fpscr & XX != 0 && self.state.fpscr & XE != 0));
-        if enabled {
-            self.state.fpscr |= FEX;
-        } else {
-            self.state.fpscr &= !FEX;
-        }
+        self.refresh_fpscr_fex();
         if record {
             self.copy_fpscr_to_cr1();
         }
@@ -222,6 +237,7 @@ impl PpcInterpreter {
         let shift = 28 - (field * 4);
         let mask = 0xF_u32 << shift;
         self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) & 0xF) << shift);
+        self.refresh_fpscr_fex();
     }
 
     fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
@@ -1067,6 +1083,7 @@ impl PpcInterpreter {
                         let field = ((self.state.fpscr >> shift) & 0xF) as u8;
                         self.state.cr[crfd] = field;
                         self.state.fpscr &= !(0xF << shift);
+                        self.refresh_fpscr_fex();
                         self.state.pc = next_pc;
                         return Ok(());
                     }
@@ -1079,6 +1096,7 @@ impl PpcInterpreter {
                         } else {
                             self.state.fpscr &= !mask;
                         }
+                        self.refresh_fpscr_fex();
                         if record {
                             self.copy_fpscr_to_cr1();
                         }
@@ -1111,6 +1129,7 @@ impl PpcInterpreter {
                             }
                             self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
+                        self.refresh_fpscr_fex();
                         if record {
                             self.copy_fpscr_to_cr1();
                         }
