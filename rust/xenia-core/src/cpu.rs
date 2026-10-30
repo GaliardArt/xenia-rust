@@ -1521,7 +1521,9 @@ impl PpcInterpreter {
                 let xo10 = (instruction >> 1) & 0x3FF;
                 let xo5 = xo10 & 0x1F;
                 let single = opcode == 59;
-                if (single && xo10 == 26) || (!single && xo10 == 24) {
+                if (single && !matches!(xo5, 18 | 20 | 21 | 22 | 24 | 25 | 28..=31))
+                    || (!single && xo10 == 24)
+                {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
                 }
                 let record = instruction & 1 != 0;
@@ -3245,8 +3247,8 @@ mod tests {
 
     #[test]
     fn reciprocal_estimate_instructions_are_restricted_to_architectural_opcodes() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
-        // fres is opcode 59; frsqrte is opcode 63.
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // fres is opcode 59; frsqrte is opcode 63; fsel has no single form.
         put_instruction(
             &mut memory,
             0x1000,
@@ -3257,6 +3259,11 @@ mod tests {
             0x1004,
             (63 << 26) | (1 << 21) | (2 << 11) | (24 << 1),
         );
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (23 << 1),
+        );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         assert!(matches!(
@@ -3264,6 +3271,11 @@ mod tests {
             Err(PpcError::UnsupportedInstruction { .. })
         ));
         cpu.state.pc = 0x1004;
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(PpcError::UnsupportedInstruction { .. })
+        ));
+        cpu.state.pc = 0x1008;
         assert!(matches!(
             cpu.step(&mut memory),
             Err(PpcError::UnsupportedInstruction { .. })
