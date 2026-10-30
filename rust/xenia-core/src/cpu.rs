@@ -5724,5 +5724,4 @@ mod tests {
         assert_eq!(cpu.state.msr, 0xA123_4567_89AB_CDEF);
         assert_eq!(cpu.state.pc, 0x1004);
     }
-
 }
