@@ -1318,17 +1318,22 @@ impl PpcInterpreter {
                 } else {
                     self.state.fpr[frt] = value;
                     if update_status {
-                        let operands: &[f64] = match xo5 {
-                            18 => &[a, b],
-                            22 => &[b],
-                            24 | 26 => &[1.0, b],
-                            25 => &[a, c],
-                            29..=31 => &[a, b, c],
-                            _ => &[a, b],
+                        let operands: &[f64] = match xo10 {
+                            12 | 14 | 15 | 814 | 815 | 846 => &[b],
+                            _ => match xo5 {
+                                18 => &[a, b],
+                                22 => &[b],
+                                24 | 26 => &[1.0, b],
+                                25 => &[a, c],
+                                29..=31 => &[a, b, c],
+                                _ => &[a, b],
+                            },
                         };
                         let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
                         if matches!(xo10, 14 | 15 | 814 | 815) {
-                            self.update_fpscr_exceptions(false, false, false, false, inexact, record);
+                            self.update_fpscr_exceptions(
+                                false, false, false, false, inexact, record,
+                            );
                         } else {
                             self.update_fpscr_for_result(value, operands, inexact, record);
                         }
