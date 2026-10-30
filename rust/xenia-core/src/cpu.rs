@@ -1077,7 +1077,9 @@ impl PpcInterpreter {
                         } else {
                             self.state.fpscr &= !mask;
                         }
-                        if record { self.copy_fpscr_to_cr1(); }
+                        if record {
+                            self.copy_fpscr_to_cr1();
+                        }
                         self.state.pc = next_pc;
                         return Ok(());
                     }
@@ -1112,14 +1114,16 @@ impl PpcInterpreter {
                     _ => {}
                 }
 
-                if xo10 == 583 { // mffs
+                if xo10 == 583 {
+                    // mffs
                     self.state.fpr[frt] = self.state.fpscr as f64;
                     if record { self.copy_fpscr_to_cr1(); }
                     self.state.pc = next_pc;
                     return Ok(());
                 }
 
-                if xo10 == 0 || xo10 == 32 { // fcmpu / fcmpo
+                if xo10 == 0 || xo10 == 32 {
+                    // fcmpu / fcmpo
                     let field = ((instruction >> 23) & 0x7) as usize;
                     let unordered = a.is_nan() || b.is_nan();
                     self.state.cr[field] = if unordered {
@@ -1146,12 +1150,12 @@ impl PpcInterpreter {
                 let mut arithmetic = false;
                 let mut update_status = false;
                 let value = match xo10 {
-                    264 => b.abs(),                 // fabs
-                    72 => b,                        // fmr
-                    136 => -b.abs(),                // fnabs
-                    40 => -b,                       // fneg
-                    12 => (b as f32) as f64,        // frsp
-                    14 | 15 | 814 | 815 => {        // fctiw/z and fctid/z
+                    264 => b.abs(),          // fabs
+                    72 => b,                 // fmr
+                    136 => -b.abs(),         // fnabs
+                    40 => -b,                // fneg
+                    12 => (b as f32) as f64, // frsp
+                    14 | 15 | 814 | 815 => { // fctiw/z and fctid/z
                         let rounded = if xo10 == 15 || xo10 == 815 {
                             b.trunc()
                         } else {
@@ -1175,7 +1179,7 @@ impl PpcInterpreter {
                             (rounded as i64) as f64
                         }
                     }
-                    846 => (b as i64) as f64,       // fcfid
+                    846 => (b as i64) as f64, // fcfid
                     _ => {
                         arithmetic = true;
                         update_status = true;
@@ -1203,11 +1207,15 @@ impl PpcInterpreter {
                     let rounded = (value as f32) as f64;
                     self.state.fpr[frt] = rounded;
                     if update_status {
-                        self.update_fpscr_for_result(
-                            rounded,
-                            &[a, b, c],
-                            record,
-                        );
+                        let operands: &[f64] = match xo5 {
+                            18 => &[a, b],
+                            22 | 26 => &[b],
+                            24 => &[1.0, b],
+                            25 => &[a, c],
+                            29..=31 => &[a, b, c],
+                            _ => &[a, b],
+                        };
+                        self.update_fpscr_for_result(rounded, operands, record);
                     }
                 } else {
                     self.state.fpr[frt] = value;
@@ -1995,12 +2003,9 @@ mod tests {
     #[test]
     fn fpscr_field_instructions_read_write_and_clear_fields() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
-        let encode_mtfsfi = |bf: u32, imm: u32| {
-            (63 << 26) | (bf << 23) | (imm << 12) | (134 << 1)
-        };
-        let encode_mcrfs = |crfd: u32, crfs: u32| {
-            (63 << 26) | (crfd << 23) | (crfs << 18) | (64 << 1)
-        };
+        let encode_mtfsfi = |bf: u32, imm: u32| (63 << 26) | (bf << 23) | (imm << 12) | (134 << 1);
+        let encode_mcrfs =
+            |crfd: u32, crfs: u32| (63 << 26) | (crfd << 23) | (crfs << 18) | (64 << 1);
         put_instruction(&mut memory, 0x1000, encode_mtfsfi(0, 0xA));
         put_instruction(&mut memory, 0x1004, encode_mtfsfi(7, 0x5));
         put_instruction(&mut memory, 0x1008, encode_mcrfs(3, 0));
@@ -2022,22 +2027,20 @@ mod tests {
     fn fpscr_bit_and_masked_field_moves_preserve_unselected_bits() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode_mtfsb = |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
-        let encode_mtfsf = |fm: u32, rb: u32| {
-            (63 << 26) | (fm << 17) | (rb << 11) | (711 << 1)
-        };
+        let encode_mtfsf = |fm: u32, rb: u32| (63 << 26) | (fm << 17) | (rb << 11) | (711 << 1);
         put_instruction(&mut memory, 0x1000, encode_mtfsb(0, 38)); // set FPSCR[0]
         put_instruction(&mut memory, 0x1004, encode_mtfsb(1, 70)); // clear FPSCR[1]
-        put_instruction(&mut memory, 0x1008, encode_mtfsf(0x80, 2)); // replace FPSCR field 0
+        put_instruction(&mut memory, 0x1008, encode_mtfsf(0x01, 2)); // replace FPSCR field 7
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0x4000_0000;
-        cpu.state.fpr[2] = 0xB000_0000_u32 as f64;
+        cpu.state.fpr[2] = 0x5_u32 as f64;
 
         for _ in 0..3 {
             cpu.step(&mut memory).unwrap();
         }
 
-        assert_eq!(cpu.state.fpscr & 0xF000_0000, 0xB000_0000);
+        assert_eq!(cpu.state.fpscr & 0xF000_000F, 0x8000_0005);
     }
 
     #[test]
