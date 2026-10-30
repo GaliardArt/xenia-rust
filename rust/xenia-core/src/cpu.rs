@@ -274,9 +274,10 @@ impl PpcInterpreter {
                     {
                         invalid_cause |= 1 << 22; // VXIDI
                     }
-                    20 | 21 if operands.len() >= 2
-                        && operands[0].is_infinite()
-                        && operands[1].is_infinite() =>
+                    20 | 21
+                        if operands.len() >= 2
+                            && operands[0].is_infinite()
+                            && operands[1].is_infinite() =>
                     {
                         invalid_cause |= 1 << 23; // VXISI
                     }
@@ -1262,9 +1263,7 @@ impl PpcInterpreter {
                     if unordered && xo10 == 32 {
                         self.state.fpscr |= 1 << 19; // VXVC
                     }
-                    self.update_fpscr_exceptions(
-                        invalid, false, false, false, false, 0, false,
-                    );
+                    self.update_fpscr_exceptions(invalid, false, false, false, false, 0, false);
                     self.state.pc = next_pc;
                     return Ok(());
                 }
@@ -1296,7 +1295,13 @@ impl PpcInterpreter {
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
                             self.state.fpscr |= 1 << 8; // VXCVI
                             self.update_fpscr_exceptions(
-                                true, false, false, false, false, 1 << 8, record,
+                                true,
+                                false,
+                                false,
+                                false,
+                                false,
+                                1 << 8,
+                                record,
                             );
                             if xo10 == 14 || xo10 == 15 {
                                 i32::MIN as f64
@@ -1361,7 +1366,13 @@ impl PpcInterpreter {
                                 _ => &[a, b],
                             },
                         };
-                        self.update_fpscr_for_result(rounded, operands, xo5, rounded != value, record);
+                        self.update_fpscr_for_result(
+                            rounded,
+                            operands,
+                            xo5,
+                            rounded != value,
+                            record,
+                        );
                     }
                 } else {
                     self.state.fpr[frt] = value;
