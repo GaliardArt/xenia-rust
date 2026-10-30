@@ -431,7 +431,7 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
-                    457 | 459 | 489 | 491 => {
+                    457 | 459 | 489 | 491 | 969 | 971 | 1001 | 1003 => {
                         // divdu/divwu/divd/divw. OE is decoded independently from
                         // the XO field; it must not be mistaken for a 64-bit opcode.
                         let is_64_bit = matches!(xo, 457 | 489);
