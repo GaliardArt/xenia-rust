@@ -1207,8 +1207,8 @@ impl PpcInterpreter {
                             26 => 1.0 / b.sqrt(), // frsqrte
                             29 => a.mul_add(c, b), // fmadd
                             28 => a.mul_add(c, -b), // fmsub
-                            31 => -a.mul_add(c, b),             // fnmadd
-                            30 => -a.mul_add(c, -b),            // fnmsub
+                            31 => -a.mul_add(c, b), // fnmadd
+                            30 => -a.mul_add(c, -b), // fnmsub
                             _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                         }
                     }
