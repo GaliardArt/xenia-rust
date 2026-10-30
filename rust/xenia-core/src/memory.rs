@@ -59,8 +59,13 @@ impl GuestMemory {
 
     pub fn write_bytes(&mut self, address: GuestAddress, data: &[u8]) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
-        let end = offset.checked_add(data.len()).ok_or(MemoryError::OutOfBounds)?;
-        let destination = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        let end = offset
+            .checked_add(data.len())
+            .ok_or(MemoryError::OutOfBounds)?;
+        let destination = self
+            .bytes
+            .get_mut(offset..end)
+            .ok_or(MemoryError::OutOfBounds)?;
         destination.copy_from_slice(data);
         Ok(())
     }
