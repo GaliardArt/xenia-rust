@@ -2989,7 +2989,7 @@ mod tests {
     fn stfs_uses_fpscr_rounding_without_changing_fpscr() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // stfs f1,0(r0)
-        put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21));
+        put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21) | 0x1000);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
@@ -3015,7 +3015,7 @@ mod tests {
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
-        cpu.state.gpr[2] = 4;
+        cpu.state.gpr[2] = 0x1004;
         cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
         cpu.state.fpscr = 0b10;
 
