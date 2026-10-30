@@ -545,7 +545,11 @@ impl PpcInterpreter {
                             };
                             self.set_carry(source < 0 && shifted_out);
                         }
-                        self.state.gpr[rt_rs] = value as u64;
+                        self.state.gpr[rt_rs] = if extended_opcode == 792 || extended_opcode == 824 {
+                            (value as i32 as i64) as u64
+                        } else {
+                            value as u64
+                        };
                         if record {
                             self.set_cr_field(0, (value as i32).cmp(&0));
                         }
