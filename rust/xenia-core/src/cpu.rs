@@ -306,6 +306,45 @@ impl PpcInterpreter {
         );
     }
 
+    fn next_up_f32(value: f32) -> f32 {
+        if value.is_nan() || value == f32::INFINITY {
+            return value;
+        }
+        if value == 0.0 {
+            return f32::from_bits(1);
+        }
+        let bits = value.to_bits();
+        f32::from_bits(if value.is_sign_positive() { bits + 1 } else { bits - 1 })
+    }
+
+    fn next_down_f32(value: f32) -> f32 {
+        if value.is_nan() || value == f32::NEG_INFINITY {
+            return value;
+        }
+        if value == 0.0 {
+            return f32::from_bits(0x8000_0001);
+        }
+        let bits = value.to_bits();
+        f32::from_bits(if value.is_sign_positive() { bits - 1 } else { bits + 1 })
+    }
+
+    fn round_to_single(&self, value: f64) -> f64 {
+        let nearest = value as f32;
+        let nearest_as_double = nearest as f64;
+        if !value.is_finite() || nearest_as_double == value {
+            return nearest_as_double;
+        }
+        let adjusted = match self.fpscr_rounding_mode() {
+            0 => nearest,
+            1 if nearest_as_double > value => Self::next_down_f32(nearest),
+            1 if nearest_as_double < value => Self::next_up_f32(nearest),
+            2 if nearest_as_double < value => Self::next_up_f32(nearest),
+            3 if nearest_as_double > value => Self::next_down_f32(nearest),
+            _ => nearest,
+        };
+        adjusted as f64
+    }
+
     fn fpscr_rounding_mode(&self) -> u32 {
         self.state.fpscr & 0b11
     }
@@ -1277,7 +1316,7 @@ impl PpcInterpreter {
                     40 => -b,        // fneg
                     12 => {
                         update_status = true;
-                        (b as f32) as f64
+                        self.round_to_single(b)
                     } // frsp
                     14 | 15 | 814 | 815 => {
                         // fctiw/z and fctid/z
@@ -1352,7 +1391,7 @@ impl PpcInterpreter {
                 if arithmetic && single {
                     // Single-precision arithmetic rounds the stored result,
                     // not the source operands, to IEEE-754 binary32.
-                    let rounded = (value as f32) as f64;
+                    let rounded = self.round_to_single(value);
                     self.state.fpr[frt] = rounded;
                     if update_status {
                         let operands: &[f64] = match xo10 {
