@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{self, ErrorKind};
 
 use xenia_core::{
-    XEX_HEADER_ENTRY_POINT, parse_xbox_pe32, parse_xex2_header, parse_xex2_security_info,
+    XEX_HEADER_ENTRY_POINT, load_xex2_uncompressed, parse_xbox_pe32, parse_xex2_header, parse_xex2_security_info,
 };
 
 fn main() {
@@ -46,6 +46,15 @@ fn run() -> Result<(), Box<dyn Error>> {
                     println!("  page descriptors:    {}", security.page_descriptors.len());
                 }
                 Err(error) => println!("  security info:       unavailable ({error})"),
+            }
+            match load_xex2_uncompressed(&bytes) {
+                Ok(image) => {
+                    println!("  load profile:        unencrypted/uncompressed");
+                    println!("  mapped base:         0x{:08X}", image.layout.load_base);
+                    println!("  entry point:         0x{:08X}", image.layout.entry_point);
+                    println!("  PE sections:         {}", image.layout.sections.len());
+                }
+                Err(error) => println!("  image load profile:  not available ({error})"),
             }
             if let Some(entry_point) = header.optional_header_value(XEX_HEADER_ENTRY_POINT) {
                 println!("  entry point:         0x{entry_point:08X}");
