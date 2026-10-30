@@ -56,7 +56,7 @@ The pipeline is staged and must not be collapsed into a single unchecked parse:
 - **LDR-2 (complete):** optional-header lookup and safe XEX2 security-info parsing, including page descriptor bounds and metadata CLI output.
 - **LDR-3 (complete, metadata only):** PE header parser for the Xbox 360 PPCBE/32-bit/Xbox-subsystem profile and section-table parsing with malformed-input tests.
 - **LDR-4 (complete, planning only):** image layout plan computes guest ranges and section permissions without mutating memory.
-- **LDR-5:** uncompressed, unencrypted XEX image path for controlled fixtures.
+- **LDR-5 (complete, restricted):** unencrypted/uncompressed XEX2 payload extraction, PE validation, and layout planning for synthetic fixtures. This does not map memory or boot a title.
 - **LDR-6:** compression and encryption paths, then imports, patches, and boot integration.
 
 No retail game fixture is included in the repository. Tests must use synthetic, legally safe fixtures and must not claim game compatibility until the entire boot pipeline is integrated and tested.
