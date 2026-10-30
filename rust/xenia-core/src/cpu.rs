@@ -1300,7 +1300,7 @@ mod tests {
 
     #[test]
     fn divide_instructions_distinguish_word_doubleword_and_overflow_forms() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
         // divdu r5,r3,r4; divd r6,r3,r4; divwu r7,r3,r4; divw r8,r3,r4
         let encode = |rt: u32, xo: u32| (31 << 26) | (rt << 21) | (3 << 16) | (4 << 11) | (xo << 1);
         put_instruction(&mut memory, 0x1000, encode(5, 457));
@@ -1322,6 +1322,8 @@ mod tests {
 
         // divd overflow: signed minimum divided by -1 with OE set.
         put_instruction(&mut memory, 0x1010, encode(9, 489) | (1 << 10));
+        put_instruction(&mut memory, 0x1014, encode(10, 459) | (1 << 10));
+        put_instruction(&mut memory, 0x1018, encode(11, 491) | (1 << 10));
         cpu.state.pc = 0x1010;
         cpu.state.gpr[3] = i64::MIN as u64;
         cpu.state.gpr[4] = u64::MAX;
@@ -1329,6 +1331,22 @@ mod tests {
         assert_eq!(cpu.state.gpr[9], 0);
         assert_ne!(cpu.state.xer & (1 << 30), 0);
         assert_ne!(cpu.state.xer & (1 << 31), 0);
+
+        // OE variants must decode separately; division by zero sets OV/SO.
+        cpu.state.pc = 0x1014;
+        cpu.state.gpr[3] = 123;
+        cpu.state.gpr[4] = 0;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[10], 0);
+        assert_ne!(cpu.state.xer & (1 << 30), 0);
+
+        // Signed 32-bit minimum divided by -1 is also an overflow case.
+        cpu.state.pc = 0x1018;
+        cpu.state.gpr[3] = i32::MIN as i64 as u64;
+        cpu.state.gpr[4] = u64::MAX;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[11], 0);
+        assert_ne!(cpu.state.xer & (1 << 30), 0);
     }
 
     #[test]
