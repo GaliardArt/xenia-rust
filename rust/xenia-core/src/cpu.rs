@@ -2137,7 +2137,7 @@ impl PpcInterpreter {
                                     raise_inexact: inexact,
                                     fraction_rounded: conversion_fraction_rounded,
                                     update_rounding: true,
-                                    invalid_cause: (if conversion_invalid { 1 << 16 } else { 0 })
+                                    invalid_cause: (if conversion_invalid { 1 << 8 } else { 0 })
                                         | (if source_signaling_nan { 1 << 24 } else { 0 }),
                                     ..FpExceptionFlags::default()
                                 },
@@ -3854,7 +3854,8 @@ mod tests {
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = (1 << 7) | prior_fprf;
         cpu.step(&mut memory).unwrap();
-        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VXVC
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_ne!(cpu.state.fpscr & (1 << 19), 0); // VXVC
         assert_eq!(cpu.state.fpscr & (1 << 16), prior_fprf & (1 << 16)); // C preserved
         assert_eq!(cpu.state.fpscr & 0x0000_F000, 1 << 12); // FPCC = unordered
     }
