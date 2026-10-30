@@ -273,6 +273,7 @@ impl PpcInterpreter {
             && (bits & 0x0008_0000_0000_0000) == 0
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_fpscr_for_result(
         &mut self,
         value: f64,
@@ -1262,13 +1263,13 @@ impl PpcInterpreter {
                         let value = if extended_opcode == 535 || extended_opcode == 567 {
                             Self::extend_single_preserving_nan(f32::from_bits(
                                 memory
-                                    .read_u32_be(GuestAddress(address as u32))
+                                    .read_u32_be()
                                     .map_err(Into::into)?,
                             ))
                         } else {
                             f64::from_bits(
                                 memory
-                                    .read_u64_be(GuestAddress(address as u32))
+                                    .read_u64_be(GuestAddress(address))
                                     .map_err(Into::into)?,
                             )
                         };
@@ -1291,7 +1292,7 @@ impl PpcInterpreter {
                         if extended_opcode == 663 || extended_opcode == 695 {
                             memory
                                 .write_u32_be(
-                                    GuestAddress(address as u32),
+                                    GuestAddress(address),
                                     self.narrow_single_for_store(self.state.fpr[rt_rs])
                                         .to_bits(),
                                 )
@@ -1299,7 +1300,7 @@ impl PpcInterpreter {
                         } else {
                             memory
                                 .write_u64_be(
-                                    GuestAddress(address as u32),
+                                    GuestAddress(address),
                                     self.state.fpr[rt_rs].to_bits(),
                                 )
                                 .map_err(Into::into)?;
@@ -1349,21 +1350,21 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let value = match xo {
                             87 | 119 => memory
-                                .read_u8(GuestAddress(address as u32))
+                                .read_u8(GuestAddress(address))
                                 .map_err(Into::into)?
                                 as u64,
                             279 | 311 => memory
-                                .read_u16_be(GuestAddress(address as u32))
+                                .read_u16_be(GuestAddress(address))
                                 .map_err(Into::into)?
                                 as u64,
                             343 | 375 => {
                                 (memory
-                                    .read_u16_be(GuestAddress(address as u32))
+                                    .read_u16_be(GuestAddress(address))
                                     .map_err(Into::into)? as i16
                                     as i64) as u64
                             }
                             23 | 55 => memory
-                                .read_u32_be(GuestAddress(address as u32))
+                                .read_u32_be(GuestAddress(address))
                                 .map_err(Into::into)? as u64,
                             _ => unreachable!(),
                         };
@@ -1385,17 +1386,17 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         match xo {
                             215 | 247 => memory
-                                .write_u8(GuestAddress(address as u32), self.state.gpr[rt_rs] as u8)
+                                .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
                                 .map_err(Into::into)?,
                             407 | 439 => memory
                                 .write_u16_be(
-                                    GuestAddress(address as u32),
+                                    GuestAddress(address),
                                     self.state.gpr[rt_rs] as u16,
                                 )
                                 .map_err(Into::into)?,
                             151 | 183 => memory
                                 .write_u32_be(
-                                    GuestAddress(address as u32),
+                                    GuestAddress(address),
                                     self.state.gpr[rt_rs] as u32,
                                 )
                                 .map_err(Into::into)?,
@@ -1597,12 +1598,12 @@ impl PpcInterpreter {
                 let value = match opcode {
                     48 | 49 => Self::extend_single_preserving_nan(f32::from_bits(
                         memory
-                            .read_u32_be(GuestAddress(address as u32))
+                            .read_u32_be(GuestAddress(address))
                             .map_err(Into::into)?,
                     )),
                     50 | 51 => f64::from_bits(
                         memory
-                            .read_u64_be(GuestAddress(address as u32))
+                            .read_u64_be(GuestAddress(address))
                             .map_err(Into::into)?,
                     ),
                     _ => unreachable!(),
@@ -1628,14 +1629,14 @@ impl PpcInterpreter {
                 if matches!(opcode, 52 | 53) {
                     memory
                         .write_u32_be(
-                            GuestAddress(address as u32),
+                            GuestAddress(address),
                             self.narrow_single_for_store(self.state.fpr[rt_rs])
                                 .to_bits(),
                         )
                         .map_err(Into::into)?;
                 } else {
                     memory
-                        .write_u64_be(GuestAddress(address as u32), bits)
+                        .write_u64_be(GuestAddress(address), bits)
                         .map_err(Into::into)?;
                 }
                 if update {
@@ -2228,7 +2229,7 @@ impl PpcInterpreter {
                 };
                 let address = base.wrapping_add(immediate as u32);
                 self.state.gpr[rt_rs] = memory
-                    .read_u8(GuestAddress(address as u32))
+                    .read_u8(GuestAddress(address))
                     .map_err(Into::into)? as u64;
                 self.state.pc = next_pc;
             }
@@ -2241,7 +2242,7 @@ impl PpcInterpreter {
                 };
                 let address = base.wrapping_add(immediate as u32);
                 let value = memory
-                    .read_u16_be(GuestAddress(address as u32))
+                    .read_u16_be(GuestAddress(address))
                     .map_err(Into::into)?;
                 self.state.gpr[rt_rs] = if opcode == 42 {
                     (value as i16 as i64) as u64
@@ -2260,11 +2261,11 @@ impl PpcInterpreter {
                 let address = base.wrapping_add(immediate as u32);
                 if opcode == 38 {
                     memory
-                        .write_u8(GuestAddress(address as u32), self.state.gpr[rt_rs] as u8)
+                        .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
                         .map_err(Into::into)?;
                 } else {
                     memory
-                        .write_u16_be(GuestAddress(address as u32), self.state.gpr[rt_rs] as u16)
+                        .write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
                         .map_err(Into::into)?;
                 }
                 self.state.pc = next_pc;
@@ -2277,17 +2278,17 @@ impl PpcInterpreter {
                 let address = (self.state.gpr[ra] as u32).wrapping_add(immediate as u32);
                 let value = match opcode {
                     33 => memory
-                        .read_u32_be(GuestAddress(address as u32))
+                        .read_u32_be(GuestAddress(address))
                         .map_err(Into::into)? as u64,
                     35 => memory
-                        .read_u8(GuestAddress(address as u32))
+                        .read_u8(GuestAddress(address))
                         .map_err(Into::into)? as u64,
                     41 => memory
-                        .read_u16_be(GuestAddress(address as u32))
+                        .read_u16_be(GuestAddress(address))
                         .map_err(Into::into)? as u64,
                     43 => {
                         (memory
-                            .read_u16_be(GuestAddress(address as u32))
+                            .read_u16_be(GuestAddress(address))
                             .map_err(Into::into)? as i16 as i64) as u64
                     }
                     _ => unreachable!(),
@@ -2305,7 +2306,7 @@ impl PpcInterpreter {
                 };
                 let address = base.wrapping_add(immediate as u32);
                 self.state.gpr[rt_rs] = memory
-                    .read_u32_be(GuestAddress(address as u32))
+                    .read_u32_be(GuestAddress(address))
                     .map_err(Into::into)? as u64;
                 self.state.pc = next_pc;
             }
@@ -2317,13 +2318,13 @@ impl PpcInterpreter {
                 let address = (self.state.gpr[ra] as u32).wrapping_add(immediate as u32);
                 match opcode {
                     37 => memory
-                        .write_u32_be(GuestAddress(address as u32), self.state.gpr[rt_rs] as u32)
+                        .write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)
                         .map_err(Into::into)?,
                     39 => memory
-                        .write_u8(GuestAddress(address as u32), self.state.gpr[rt_rs] as u8)
+                        .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
                         .map_err(Into::into)?,
                     45 => memory
-                        .write_u16_be(GuestAddress(address as u32), self.state.gpr[rt_rs] as u16)
+                        .write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
                         .map_err(Into::into)?,
                     _ => unreachable!(),
                 }
@@ -2339,7 +2340,7 @@ impl PpcInterpreter {
                 };
                 let address = base.wrapping_add(immediate as u32);
                 memory
-                    .write_u32_be(GuestAddress(address as u32), self.state.gpr[rt_rs] as u32)
+                    .write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)
                     .map_err(Into::into)?;
                 self.state.pc = next_pc;
             }
@@ -4028,7 +4029,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         // fdiv f1,f2,f3; mtfsb0 FPSCR[FX]; fdiv f1,f2,f3
         let fdiv = (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1);
-        let clear_fx = (63 << 26) | (0 << 21) | (70 << 1);
+        let clear_fx = (63 << 26) | (70 << 1);
         put_instruction(&mut memory, 0x1000, fdiv);
         put_instruction(&mut memory, 0x1004, clear_fx);
         put_instruction(&mut memory, 0x1008, fdiv);
@@ -4199,7 +4200,7 @@ mod tests {
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
-        cpu.state.fpr[3] = f64::from_bits(0x8765_4321_ABCDEF01);
+        cpu.state.fpr[3] = f64::from_bits(0x8765_4321_ABCD_EF01);
         cpu.state.fpr[2] = 2.75;
         cpu.state.fpscr = 0; // nearest, ties to even
 
