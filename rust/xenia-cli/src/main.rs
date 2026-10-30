@@ -4,7 +4,8 @@ use std::fs;
 use std::io::{self, ErrorKind};
 
 use xenia_core::{
-    XEX_HEADER_ENTRY_POINT, load_xex2_uncompressed, parse_xbox_pe32, parse_xex2_header, parse_xex2_security_info,
+    XEX_HEADER_ENTRY_POINT, load_xex2_uncompressed, parse_xbox_pe32, parse_xex2_header,
+    parse_xex2_security_info,
 };
 
 fn main() {
