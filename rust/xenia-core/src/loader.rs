@@ -61,7 +61,9 @@ impl fmt::Display for XexLoadError {
             Self::Pe(error) => write!(f, "embedded PE image: {error}"),
             Self::Layout(error) => write!(f, "PE image layout: {error}"),
             Self::AddressSpace(error) => write!(f, "guest memory mapping: {error}"),
-            Self::SectionOutsideImage => f.write_str("PE section extends beyond the loaded XEX image"),
+            Self::SectionOutsideImage => {
+                f.write_str("PE section extends beyond the loaded XEX image")
+            }
             Self::ImageSizeDoesNotMatchPageTable => {
                 f.write_str("XEX image size does not match its page-descriptor table")
             }
@@ -571,10 +573,7 @@ mod tests {
             Err(AddressSpaceError::PermissionDenied)
         );
         assert_eq!(
-            crate::memory::GuestMemoryAccess::fetch_u32_be(
-                &memory,
-                GuestAddress(0x8200_1000)
-            ),
+            crate::memory::GuestMemoryAccess::fetch_u32_be(&memory, GuestAddress(0x8200_1000)),
             Err(AddressSpaceError::PermissionDenied)
         );
     }
