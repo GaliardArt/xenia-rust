@@ -167,6 +167,7 @@ impl PpcInterpreter {
         overflow: bool,
         underflow: bool,
         inexact: bool,
+        invalid_cause: u32,
         record: bool,
     ) {
         const FX: u32 = 1 << 31;
@@ -184,7 +185,7 @@ impl PpcInterpreter {
         }
         let mut raised = 0;
         if invalid {
-            raised |= VX;
+            raised |= VX | invalid_cause;
         }
         if div_zero {
             raised |= ZX;
@@ -241,6 +242,7 @@ impl PpcInterpreter {
         &mut self,
         value: f64,
         operands: &[f64],
+        operation: u32,
         inexact: bool,
         record: bool,
     ) {
@@ -256,7 +258,41 @@ impl PpcInterpreter {
             && operands[0].is_finite();
         let overflow =
             value.is_infinite() && !div_zero && operands.iter().all(|operand| operand.is_finite());
-        let underflow = value != 0.0 && value.is_subnormal() && inexact;
+        let underflow = (value == 0.0 || value.is_subnormal()) && inexact;
+        let mut invalid_cause = 0;
+        if invalid {
+            if operands.iter().any(|operand| Self::is_signaling_nan(*operand)) {
+                invalid_cause |= 1 << 24; // VXSNAN
+            } else {
+                match operation {
+                    18 if operands.len() >= 2 && operands[0] == 0.0 && operands[1] == 0.0 => {
+                        invalid_cause |= 1 << 21; // VXZDZ
+                    }
+                    18 if operands.len() >= 2
+                        && operands[0].is_infinite()
+                        && operands[1].is_infinite() =>
+                    {
+                        invalid_cause |= 1 << 22; // VXIDI
+                    }
+                    20 | 21 if operands.len() >= 2
+                        && operands[0].is_infinite()
+                        && operands[1].is_infinite() =>
+                    {
+                        invalid_cause |= 1 << 23; // VXISI
+                    }
+                    25 if operands.len() >= 2
+                        && ((operands[0].is_infinite() && operands[1] == 0.0)
+                            || (operands[1].is_infinite() && operands[0] == 0.0)) =>
+                    {
+                        invalid_cause |= 1 << 20; // VXIMZ
+                    }
+                    22 | 26 if operands.last().is_some_and(|operand| *operand < 0.0) => {
+                        invalid_cause |= 1 << 9; // VXSQRT
+                    }
+                    _ => {}
+                }
+            }
+        }
         self.set_fprf_for_value(value);
         self.update_fpscr_exceptions(
             invalid,
@@ -264,6 +300,7 @@ impl PpcInterpreter {
             overflow,
             underflow,
             inexact || overflow,
+            invalid_cause,
             record,
         );
     }
@@ -1219,7 +1256,15 @@ impl PpcInterpreter {
                             && (bits & 0x0008_0000_0000_0000) == 0
                     });
                     let invalid = unordered && (xo10 == 32 || signaling_nan);
-                    self.update_fpscr_exceptions(invalid, false, false, false, false, false);
+                    if signaling_nan {
+                        self.state.fpscr |= 1 << 24; // VXSNAN
+                    }
+                    if unordered && xo10 == 32 {
+                        self.state.fpscr |= 1 << 19; // VXVC
+                    }
+                    self.update_fpscr_exceptions(
+                        invalid, false, false, false, false, 0, false,
+                    );
                     self.state.pc = next_pc;
                     return Ok(());
                 }
@@ -1249,7 +1294,10 @@ impl PpcInterpreter {
                         };
                         update_status = true;
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
-                            self.update_fpscr_exceptions(true, false, false, false, false, record);
+                            self.state.fpscr |= 1 << 8; // VXCVI
+                            self.update_fpscr_exceptions(
+                                true, false, false, false, false, 1 << 8, record,
+                            );
                             if xo10 == 14 || xo10 == 15 {
                                 i32::MIN as f64
                             } else {
@@ -1313,7 +1361,7 @@ impl PpcInterpreter {
                                 _ => &[a, b],
                             },
                         };
-                        self.update_fpscr_for_result(rounded, operands, rounded != value, record);
+                        self.update_fpscr_for_result(rounded, operands, xo5, rounded != value, record);
                     }
                 } else {
                     self.state.fpr[frt] = value;
@@ -1332,10 +1380,10 @@ impl PpcInterpreter {
                         let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
                         if matches!(xo10, 14 | 15 | 814 | 815) {
                             self.update_fpscr_exceptions(
-                                false, false, false, false, inexact, record,
+                                false, false, false, false, inexact, 0, record,
                             );
                         } else {
-                            self.update_fpscr_for_result(value, operands, inexact, record);
+                            self.update_fpscr_for_result(value, operands, xo5, inexact, record);
                         }
                     } else if record {
                         self.copy_fpscr_to_cr1();
