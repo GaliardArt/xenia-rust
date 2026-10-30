@@ -131,6 +131,22 @@ impl GuestMemory {
 pub trait GuestMemoryAccess {
     type Error;
 
+    fn read_u8(&self, address: GuestAddress) -> Result<u8, Self::Error>;
+
+    fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error>;
+
+    fn read_u16_be(&self, address: GuestAddress) -> Result<u16, Self::Error> {
+        let high = self.read_u8(address)?;
+        let low = self.read_u8(GuestAddress(address.0.wrapping_add(1)))?;
+        Ok(u16::from_be_bytes([high, low]))
+    }
+
+    fn write_u16_be(&mut self, address: GuestAddress, value: u16) -> Result<(), Self::Error> {
+        let [high, low] = value.to_be_bytes();
+        self.write_u8(address, high)?;
+        self.write_u8(GuestAddress(address.0.wrapping_add(1)), low)
+    }
+
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error>;
 
     fn fetch_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
@@ -142,6 +158,14 @@ pub trait GuestMemoryAccess {
 
 impl GuestMemoryAccess for GuestMemory {
     type Error = MemoryError;
+
+    fn read_u8(&self, address: GuestAddress) -> Result<u8, Self::Error> {
+        GuestMemory::read_u8(self, address)
+    }
+
+    fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error> {
+        GuestMemory::write_u8(self, address, value)
+    }
 
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
         GuestMemory::read_u32_be(self, address)
