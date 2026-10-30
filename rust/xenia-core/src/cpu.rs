@@ -424,6 +424,38 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
+                    87 | 119 | 279 | 311 | 343 | 375 | 23 | 55 => {
+                        let update = matches!(xo, 119 | 311 | 375 | 55);
+                        if update && (ra == 0 || ra == rt_rs) {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let value = match xo {
+                            87 | 119 => memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64,
+                            279 | 311 => memory.read_u16_be(GuestAddress(address)).map_err(Into::into)? as u64,
+                            343 | 375 => (memory.read_u16_be(GuestAddress(address)).map_err(Into::into)? as i16 as i64) as u64,
+                            23 | 55 => memory.read_u32_be(GuestAddress(address)).map_err(Into::into)? as u64,
+                            _ => unreachable!(),
+                        };
+                        self.state.gpr[rt_rs] = value;
+                        if update { self.state.gpr[ra] = address as u64; }
+                    }
+                    215 | 247 | 407 | 439 | 151 | 183 => {
+                        let update = matches!(xo, 247 | 439 | 183);
+                        if update && ra == 0 {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        match xo {
+                            215 | 247 => memory.write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8).map_err(Into::into)?,
+                            407 | 439 => memory.write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16).map_err(Into::into)?,
+                            151 | 183 => memory.write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32).map_err(Into::into)?,
+                            _ => unreachable!(),
+                        }
+                        if update { self.state.gpr[ra] = address as u64; }
+                    }
                     28 | 316 | 444 => {
                         let value = match extended_opcode {
                             28 => left & right,
