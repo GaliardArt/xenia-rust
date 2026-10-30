@@ -9,8 +9,14 @@ use crate::address_space::AddressSpaceError;
 use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
 /// PowerPC MSR floating-point exception mode bits (32-bit Xenon view).
-pub const PPC_MSR_FE0: u32 = 1 << 11;
-pub const PPC_MSR_FE1: u32 = 1 << 8;
+pub const PPC_MSR_FE0: u64 = 1 << 11;
+pub const PPC_MSR_FE1: u64 = 1 << 8;
+/// Effective address of the Xenon Program Exception vector.
+pub const PPC_PROGRAM_EXCEPTION_VECTOR: u32 = 0x700;
+/// SRR1 bit 43: the program exception was a floating-point enabled exception.
+pub const PPC_SRR1_FP_ENABLED_EXCEPTION: u64 = 1 << 20;
+/// SRR1 bit 47: SRR0 identifies a subsequent instruction, not the faulting one.
+pub const PPC_SRR1_IMPRECISE: u64 = 1 << 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PpcState {
@@ -20,8 +26,12 @@ pub struct PpcState {
     /// VMX128 register file. Each vector is stored in guest byte order.
     pub vr: [[u8; 16]; 128],
     pub pc: u32,
-    /// Machine State Register, represented in the 32-bit Xenon execution view.
-    pub msr: u32,
+    /// Xenon's 64-bit Machine State Register (FE0/FE1 occupy bits 11 and 8).
+    pub msr: u64,
+    /// Machine Status Save/Restore Register 0.
+    pub srr0: u64,
+    /// Machine Status Save/Restore Register 1.
+    pub srr1: u64,
     pub lr: u64,
     pub ctr: u64,
     pub xer: u64,
@@ -38,6 +48,8 @@ impl Default for PpcState {
             vr: [[0; 16]; 128],
             pc: 0,
             msr: 0,
+            srr0: 0,
+            srr1: 0,
             lr: 0,
             ctr: 0,
             xer: 0,
@@ -147,6 +159,43 @@ impl PpcInterpreter {
     /// events and FE-enable transition events stop execution immediately.
     pub fn pending_exception(&self) -> Option<PpcException> {
         self.pending_exception
+    }
+
+    /// Enters the Xenon Program Exception handler for the pending FP event.
+    ///
+    /// The saved MSR fields follow the Xenon PPU exception-entry mask. SRR1
+    /// uses PowerPC's MSB-first bit numbering: bit 43 identifies an FP-enabled
+    /// Program exception and bit 47 marks a subsequent saved instruction.
+    /// For imprecise arithmetic events we retain the first faulting PC tracked
+    /// by the interpreter; an FE-enable transition instead saves its next PC.
+    pub fn enter_pending_exception(&mut self) -> Option<PpcException> {
+        const SRR1_MSR_MASK: u64 = 0xFFFF_FFFF_87C0_FFFF;
+        const PROGRAM_ENTRY_MSR_MASK: u64 = 0xFFFF_FFFF_FFFF_10C8;
+        const PROGRAM_ENTRY_MSR_BITS: u64 = 0x9000_0000_0000_0000;
+
+        let exception = self.pending_exception.take()?;
+        let (saved_pc, subsequent_instruction) = match exception {
+            PpcException::FloatingPoint { instruction_pc, .. } => {
+                (instruction_pc as u64, false)
+            }
+            PpcException::FloatingPointEnableTransition { next_pc, .. } => {
+                (next_pc as u64, true)
+            }
+        };
+
+        self.state.srr0 = saved_pc;
+        self.state.srr1 = (self.state.msr & SRR1_MSR_MASK)
+            | PPC_SRR1_FP_ENABLED_EXCEPTION
+            | if subsequent_instruction {
+                PPC_SRR1_IMPRECISE
+            } else {
+                0
+            };
+        self.state.msr =
+            (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
+        self.state.pc = PPC_PROGRAM_EXCEPTION_VECTOR;
+
+        Some(exception)
     }
 
     /// Returns an ordinary imprecise FP event that must be delivered before
@@ -1286,7 +1335,7 @@ impl PpcInterpreter {
                         // A transition from FE=00 to FE!=00 with sticky FEX
                         // already asserted raises a program exception at NIA.
                         let previous_mode = self.fp_exception_mode();
-                        self.state.msr = self.state.gpr[rt_rs] as u32;
+                        self.state.msr = self.state.gpr[rt_rs];
                         let mode = self.fp_exception_mode();
                         self.state.pc = next_pc;
                         if previous_mode == PpcFpExceptionMode::Disabled
@@ -5461,6 +5510,76 @@ mod tests {
         assert_eq!(cpu.state.fpscr & (1 << 31), 0); // FX comes only from source bit 31
     }
 
+
+
+    #[test]
+    fn precise_fp_exception_enters_program_vector_and_saves_xenon_state() {
+        let mut cpu = PpcInterpreter::default();
+        let original_msr = 0x0000_1234_0000_0030 | PPC_MSR_FE0 | PPC_MSR_FE1;
+        let exception = PpcException::FloatingPoint {
+            instruction_pc: 0x1234,
+            causes: 1 << 29,
+            mode: PpcFpExceptionMode::Precise,
+        };
+        cpu.state.pc = 0x1238;
+        cpu.state.msr = original_msr;
+        cpu.pending_exception = Some(exception);
+
+        assert_eq!(cpu.enter_pending_exception(), Some(exception));
+
+        assert_eq!(cpu.state.srr0, 0x1234);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, 0);
+        assert_eq!(
+            cpu.state.srr1 & 0xFFFF_FFFF_87C0_FFFF,
+            original_msr & 0xFFFF_FFFF_87C0_FFFF
+        );
+        assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+        assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), 0);
+        assert_eq!(cpu.state.msr & 0x30, 0); // Xenon exception entry clears IR and DR.
+        assert_eq!(cpu.state.msr & 0x9000_0000_0000_0000, 0x9000_0000_0000_0000);
+        assert_eq!(cpu.pending_exception(), None);
+    }
+
+    #[test]
+    fn imprecise_fp_exception_saves_first_faulting_instruction_without_subsequent_marker() {
+        let mut cpu = PpcInterpreter::default();
+        let exception = PpcException::FloatingPoint {
+            instruction_pc: 0x1008,
+            causes: 1 << 25,
+            mode: PpcFpExceptionMode::ImpreciseRecoverable,
+        };
+        cpu.state.pc = 0x1020; // A later synchronization boundary reported it.
+        cpu.state.msr = PPC_MSR_FE0;
+        cpu.pending_exception = Some(exception);
+
+        assert_eq!(cpu.enter_pending_exception(), Some(exception));
+
+        assert_eq!(cpu.state.srr0, 0x1008);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, 0);
+        assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+    }
+
+    #[test]
+    fn enabling_fe_with_sticky_fex_saves_next_pc_and_subsequent_marker() {
+        let mut cpu = PpcInterpreter::default();
+        let exception = PpcException::FloatingPointEnableTransition {
+            next_pc: 0x2004,
+            causes: 1 << 29,
+            mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
+        };
+        cpu.state.pc = 0x2004;
+        cpu.state.msr = PPC_MSR_FE1;
+        cpu.pending_exception = Some(exception);
+
+        assert_eq!(cpu.enter_pending_exception(), Some(exception));
+
+        assert_eq!(cpu.state.srr0, 0x2004);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, PPC_SRR1_IMPRECISE);
+        assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+    }
 
 
 }
