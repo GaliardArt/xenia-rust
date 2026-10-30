@@ -117,15 +117,23 @@ impl GuestMemory {
     pub fn read_u64_be(&self, address: GuestAddress) -> Result<u64, MemoryError> {
         let offset = self.offset_of(address)?;
         let end = offset.checked_add(8).ok_or(MemoryError::OutOfBounds)?;
-        let bytes = self.bytes.get(offset..end).ok_or(MemoryError::OutOfBounds)?;
-        Ok(u64::from_be_bytes(bytes.try_into().expect("slice length is checked")))
+        let bytes = self
+            .bytes
+            .get(offset..end)
+            .ok_or(MemoryError::OutOfBounds)?;
+        Ok(u64::from_be_bytes(
+            bytes.try_into().expect("slice length is checked"),
+        ))
     }
 
     /// Writes a 64-bit value in the Xbox 360's big-endian byte order.
     pub fn write_u64_be(&mut self, address: GuestAddress, value: u64) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
         let end = offset.checked_add(8).ok_or(MemoryError::OutOfBounds)?;
-        let bytes = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self
+            .bytes
+            .get_mut(offset..end)
+            .ok_or(MemoryError::OutOfBounds)?;
         bytes.copy_from_slice(&value.to_be_bytes());
         Ok(())
     }
