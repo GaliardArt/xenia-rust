@@ -1339,9 +1339,25 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
-                    146 => {
-                        // The 32-bit Xenon MSR model implements L=0. L=1
-                        // selects the distinct 64-bit MSR update form.
+                    339 | 467 => {
+                        // mfspr / mtspr. The SPR field is split across the
+                        // instruction and its two five-bit halves are swapped.
+                        if record {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let spr = (((instruction >> 11) & 0x1F) << 5)
+                            | ((instruction >> 16) & 0x1F);
+                        match (extended_opcode, spr) {
+                            (339, 26) => self.state.gpr[rt_rs] = self.state.srr0,
+                            (339, 27) => self.state.gpr[rt_rs] = self.state.srr1,
+                            (467, 26) => self.state.srr0 = self.state.gpr[rt_rs],
+                            (467, 27) => self.state.srr1 = self.state.gpr[rt_rs],
+                            _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                        }
+                        self.state.pc = next_pc;
+                    }
+                        // Xenon mtmsr writes the full 64-bit MSR. The L=1
+                        // form is reserved for this instruction encoding.
                         if instruction & 0x001F_0000 != 0 {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
@@ -5635,7 +5651,52 @@ mod tests {
         assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
         assert_eq!(cpu.state.msr & 0x30, 0x30); // IR/DR restored from SRR1.
         assert_eq!(cpu.state.msr & (1 << 20), 0); // SRR1 bit 43 is exception syndrome.
-        assert_eq!(cpu.state.msr & (1 << 16), 0); // SRR1 bit 47 is not MSR[ILE].
+        assert_eq!(cpu.state.msr & (1 << 16), 0); // SRR1 bit 47 is not copied into the MSR.
+    }
+
+
+    #[test]
+    fn mfspr_and_mtspr_access_srr0_and_srr1_for_exception_handlers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_spr = |rt: u32, spr: u32, xo: u32| {
+            (31 << 26) | (rt << 21) | ((spr & 0x1F) << 16) | (((spr >> 5) & 0x1F) << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode_spr(3, 26, 339)); // mfspr r3,SRR0
+        put_instruction(&mut memory, 0x1004, encode_spr(4, 27, 339)); // mfspr r4,SRR1
+        put_instruction(&mut memory, 0x1008, encode_spr(5, 26, 467)); // mtspr SRR0,r5
+        put_instruction(&mut memory, 0x100C, encode_spr(6, 27, 467)); // mtspr SRR1,r6
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.srr0 = 0x1234_5678;
+        cpu.state.srr1 = 0xFEDC_BA98_7654_3210;
+        cpu.state.gpr[5] = 0x8765_4321;
+        cpu.state.gpr[6] = 0x0123_4567_89AB_CDEF;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[3], 0x1234_5678);
+        assert_eq!(cpu.state.gpr[4], 0xFEDC_BA98_7654_3210);
+        assert_eq!(cpu.state.srr0, 0x8765_4321);
+        assert_eq!(cpu.state.srr1, 0x0123_4567_89AB_CDEF);
+        assert_eq!(cpu.state.pc, 0x1010);
+    }
+
+    #[test]
+    fn mtmsr_preserves_the_full_64_bit_xenon_machine_state_register() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsr r3 (opcode 31, XO 146).
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0xA123_4567_89AB_CDEF;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.msr, 0xA123_4567_89AB_CDEF);
+        assert_eq!(cpu.state.pc, 0x1004);
     }
 
 
