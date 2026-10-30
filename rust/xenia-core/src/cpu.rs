@@ -3877,7 +3877,7 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: 1 << 28, // OX
                 mode: PpcFpExceptionMode::Precise,
             })
@@ -3941,9 +3941,10 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: 1 << 28, // OX
-            })
+            
+                mode: PpcFpExceptionMode::Precise,})
         );
         assert!(cpu.state.fpr[1].is_finite());
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
@@ -3956,7 +3957,7 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1004,
+                instruction_pc: 0x1004,
                 causes: 1 << 27, // UX
                 mode: PpcFpExceptionMode::Precise,
             })
@@ -4672,9 +4673,10 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: 1 << 27, // UX
-            })
+            
+                mode: PpcFpExceptionMode::Precise,})
         );
         assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(1) as f64).to_bits());
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // enabled underflow: UX
@@ -4723,7 +4725,8 @@ mod tests {
         let expected = PpcException::FloatingPoint {
             instruction_pc: 0x1000,
             causes: (1 << 29) | (1 << 21), // VX | VXZDZ
-        };
+        
+            mode: PpcFpExceptionMode::Precise,};
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.pending_exception(), Some(expected));
         assert_eq!(cpu.take_pending_exception(), Some(expected));
@@ -4864,7 +4867,7 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: 1 << 25, // XX
                 mode: PpcFpExceptionMode::Precise,
             })
@@ -4894,7 +4897,7 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: (1 << 29) | (1 << 19), // VX | VXVC
                 mode: PpcFpExceptionMode::Precise,
             })
