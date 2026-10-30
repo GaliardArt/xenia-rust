@@ -266,7 +266,7 @@ impl PpcInterpreter {
 
         let invalid_causes = self.state.fpscr & VX_CAUSES;
         if self.state.fpscr & VE != 0
-            && (!previous_fpscr & VE != 0 || newly_set & VX_CAUSES != 0)
+            && (previous_fpscr & VE == 0 || newly_set & VX_CAUSES != 0)
             && invalid_causes != 0
         {
             causes |= VX | invalid_causes;
@@ -981,8 +981,9 @@ impl PpcInterpreter {
         M: GuestMemoryAccess,
         M::Error: Into<PpcError>,
     {
-        // Never discard a guest exception silently. The CPU loop must consume
-        // and dispatch it before another instruction can execute.
+        // A precise exception must be dispatched before another instruction executes.
+        // Imprecise-mode events remain pending while the guest advances to a
+        // synchronization point; the outer CPU loop owns that scheduling.
         if let Some(exception @ PpcException::FloatingPoint {
             mode: PpcFpExceptionMode::Precise,
             ..
