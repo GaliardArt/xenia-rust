@@ -441,18 +441,30 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
-                    11 | 75 => {
-                        let a = if xo == 75 {
-                            self.state.gpr[ra] as u32 as i32 as i64
-                        } else {
-                            self.state.gpr[ra] as u32 as u64 as i64
+                    9 | 11 | 73 | 75 => {
+                        // Multiply-high operations must use a product wide enough
+                        // for the full architectural operand width. In particular,
+                        // mulhwu's u32*u32 product does not fit in i64 for all inputs.
+                        let value = match xo {
+                            9 => {
+                                let product = (left as u128) * (right as u128);
+                                (product >> 64) as u64
+                            }
+                            11 => {
+                                let product = ((left as u32 as u128) * (right as u32 as u128));
+                                (product >> 32) as u64
+                            }
+                            73 => {
+                                let product = (left as i64 as i128) * (right as i64 as i128);
+                                (product >> 64) as u64
+                            }
+                            75 => {
+                                let a = left as u32 as i32 as i64;
+                                let b = right as u32 as i32 as i64;
+                                ((a * b) >> 32) as u32 as u64
+                            }
+                            _ => unreachable!(),
                         };
-                        let b = if xo == 75 {
-                            self.state.gpr[rb] as u32 as i32 as i64
-                        } else {
-                            self.state.gpr[rb] as u32 as u64 as i64
-                        };
-                        let value = ((a * b) >> 32) as u64;
                         self.state.gpr[rt_rs] = value;
                         if record {
                             self.set_cr_field(0, (value as i64).cmp(&0));
@@ -1313,6 +1325,36 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[6], 4);
         assert_ne!(cpu.state.xer & (1 << 29), 0);
+    }
+
+    #[test]
+    fn multiply_high_operations_use_full_width_intermediate_products() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode = |rt: u32, ra: u32, rb: u32, xo: u32| {
+            (31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode(5, 3, 4, 11)); // mulhwu
+        put_instruction(&mut memory, 0x1004, encode(6, 3, 4, 75)); // mulhw
+        put_instruction(&mut memory, 0x1008, encode(7, 3, 4, 9)); // mulhdu
+        put_instruction(&mut memory, 0x100C, encode(8, 3, 4, 73)); // mulhd
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = u32::MAX as u64;
+        cpu.state.gpr[4] = u32::MAX as u64;
+        for _ in 0..2 {
+            cpu.step(&mut memory).unwrap();
+        }
+        assert_eq!(cpu.state.gpr[5], 0xFFFF_FFFE);
+        assert_eq!(cpu.state.gpr[6], 0);
+
+        cpu.state.gpr[3] = u64::MAX;
+        cpu.state.gpr[4] = u64::MAX;
+        for _ in 0..2 {
+            cpu.step(&mut memory).unwrap();
+        }
+        assert_eq!(cpu.state.gpr[7], u64::MAX - 1);
+        assert_eq!(cpu.state.gpr[8], 0);
     }
 
     #[test]
