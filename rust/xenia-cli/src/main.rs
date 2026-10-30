@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{self, ErrorKind};
 
 use xenia_core::{
-    XEX_HEADER_ENTRY_POINT, load_xex2_uncompressed, parse_xbox_pe32, parse_xex2_header,
+    XEX_HEADER_ENTRY_POINT, load_xex2_image, parse_xbox_pe32, parse_xex2_header,
     parse_xex2_security_info,
 };
 
@@ -48,7 +48,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 }
                 Err(error) => println!("  security info:       unavailable ({error})"),
             }
-            match load_xex2_uncompressed(&bytes) {
+            match load_xex2_image(&bytes) {
                 Ok(image) => {
                     println!("  load profile:        unencrypted/uncompressed");
                     println!("  mapped base:         0x{:08X}", image.layout.load_base);
