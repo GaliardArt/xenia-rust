@@ -140,6 +140,27 @@ impl PpcInterpreter {
                 self.set_cr_field(field, left.cmp(&right));
                 self.state.pc = next_pc;
             }
+            // rlwinm RA,RS,SH,MB,ME — rotate left word and mask.
+            21 => {
+                let shift = ((instruction >> 11) & 0x1F) as u32;
+                let mask_begin = ((instruction >> 6) & 0x1F) as u32;
+                let mask_end = ((instruction >> 1) & 0x1F) as u32;
+                let mut mask = 0_u32;
+                let mut bit = mask_begin;
+                loop {
+                    mask |= 1_u32 << (31 - bit);
+                    if bit == mask_end {
+                        break;
+                    }
+                    bit = (bit + 1) & 0x1F;
+                }
+                let value = (self.state.gpr[rt_rs] as u32).rotate_left(shift) & mask;
+                self.state.gpr[ra] = value as u64;
+                if instruction & 1 != 0 {
+                    self.set_cr_field(0, (value as i32).cmp(&0));
+                }
+                self.state.pc = next_pc;
+            }
             // bc BO,BI,BD,AA,LK — CR and CTR condition handling.
             16 => {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
@@ -182,6 +203,61 @@ impl PpcInterpreter {
                     self.state.lr = next_pc as u64;
                 }
                 self.state.pc = if taken { target } else { next_pc };
+            }
+            // cmpw/cmplw, add, subf, and, or, xor — common X-form integer operations.
+            31 => {
+                let rb = ((instruction >> 11) & 0x1F) as usize;
+                let extended_opcode = (instruction >> 1) & 0x3FF;
+                let record = instruction & 1 != 0;
+                let oe = instruction & (1 << 10) != 0;
+                let left = self.state.gpr[ra];
+                let right = self.state.gpr[rb];
+                match extended_opcode {
+                    0 | 32 => {
+                        let field = ((instruction >> 23) & 0x7) as usize;
+                        let is_64_bit = instruction & (1 << 21) != 0;
+                        let ordering = if extended_opcode == 0 {
+                            if is_64_bit {
+                                (left as i64).cmp(&(right as i64))
+                            } else {
+                                (left as u32 as i32).cmp(&(right as u32 as i32))
+                            }
+                        } else if is_64_bit {
+                            left.cmp(&right)
+                        } else {
+                            (left as u32).cmp(&(right as u32))
+                        };
+                        self.set_cr_field(field, ordering);
+                    }
+                    266 | 40 => {
+                        if oe {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let value = if extended_opcode == 266 {
+                            left.wrapping_add(right)
+                        } else {
+                            right.wrapping_sub(left)
+                        };
+                        self.state.gpr[rt_rs] = value;
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
+                    }
+                    28 | 316 | 444 => {
+                        let value = match extended_opcode {
+                            28 => left & right,
+                            316 => left ^ right,
+                            444 => left | right,
+                            _ => unreachable!(),
+                        };
+                        self.state.gpr[ra] = value;
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
+                    }
+                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                }
+                self.state.pc = next_pc;
             }
             // lwz RT,D(RA) — load a zero-extended 32-bit word.
             32 => {
