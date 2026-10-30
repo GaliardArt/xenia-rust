@@ -1015,7 +1015,7 @@ impl PpcInterpreter {
                 }
                 self.state.pc = next_pc;
             }
-            // Floating-point execution: A-form arithmetic and common X-form operations.
+            // Scalar PowerPC floating-point arithmetic and FPSCR control.
             59 | 63 => {
                 let frt = rt_rs;
                 let fra = ra;
@@ -1029,50 +1029,159 @@ impl PpcInterpreter {
                 let b = self.state.fpr[frb];
                 let c = self.state.fpr[frc];
 
-                let (value, updates_fpr) = match xo10 {
-                    264 => (b.abs(), true),                 // fabs
-                    72 => (b, true),                        // fmr
-                    136 => (-b.abs(), true),                // fnabs
-                    40 => (-b, true),                       // fneg
-                    12 => ((b as f32) as f64, true),        // frsp
-                    14 => (b as i32 as f64, true),          // fctiw (approximation)
-                    15 => (b.trunc() as i32 as f64, true),  // fctiwz
-                    583 => (self.state.fpscr as f64, true), // mffs
-                    0 | 32 => {
-                        let field = ((instruction >> 23) & 0x7) as usize;
-                        let condition = if a.is_nan() || b.is_nan() {
-                            0b0001
-                        } else {
-                            match a.partial_cmp(&b).unwrap() {
-                                Ordering::Less => 0b1000,
-                                Ordering::Greater => 0b0100,
-                                Ordering::Equal => 0b0010,
-                            }
-                        };
-                        self.state.cr[field] = condition;
-                        (0.0, false)
+                // FPSCR field moves and bit operations use PowerPC's MSB-first
+                // bit numbering. They do not execute an arithmetic operation.
+                match xo10 {
+                    64 => { // mcrfs CRFD,CRFS
+                        let crfd = ((instruction >> 23) & 0x7) as usize;
+                        let crfs = ((instruction >> 18) & 0x7) as usize;
+                        let shift = 28 - crfs * 4;
+                        let field = ((self.state.fpscr >> shift) & 0xF) as u8;
+                        self.state.cr[crfd] = field;
+                        self.state.fpscr &= !(0xF << shift);
+                        self.state.pc = next_pc;
+                        return Ok(());
                     }
-                    _ => match xo5 {
-                        21 => (a + b, true),                        // fadd
-                        20 => (a - b, true),                        // fsub
-                        18 => (a / b, true),                        // fdiv
-                        25 => (a * c, true),                        // fmul
-                        23 => (if a >= 0.0 { c } else { b }, true), // fsel
-                        22 => (b.sqrt(), true),                     // fsqrt
-                        24 => (1.0 / b, true),                      // fres
-                        26 => (1.0 / b.sqrt(), true),               // frsqrte
-                        29 => (a.mul_add(c, b), true),              // fmadd
-                        28 => (a.mul_add(c, -b), true),             // fmsub
-                        31 => (-a.mul_add(c, b), true),             // fnmadd
-                        30 => (-a.mul_add(c, -b), true),            // fnmsub
-                        _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
-                    },
+                    38 | 70 => { // mtfsb1 / mtfsb0
+                        let bit = ((instruction >> 21) & 0x1F) as u32;
+                        let mask = 1_u32 << (31 - bit);
+                        if xo10 == 38 { self.state.fpscr |= mask; } else { self.state.fpscr &= !mask; }
+                        if record { self.copy_fpscr_to_cr1(); }
+                        self.state.pc = next_pc;
+                        return Ok(());
+                    }
+                    134 => { // mtfsfi BF,IMM
+                        let field = ((instruction >> 23) & 0x7) as usize;
+                        let immediate = ((instruction >> 12) & 0xF) as u8;
+                        self.write_fpscr_field(field, immediate);
+                        if record { self.copy_fpscr_to_cr1(); }
+                        self.state.pc = next_pc;
+                        return Ok(());
+                    }
+                    711 => { // mtfsf FM,FRB (and the Xenia-supported L form)
+                        let field_mask = ((instruction >> 17) & 0xFF) as u8;
+                        let value = self.state.fpr[frb] as u32;
+                        if instruction & (1 << 16) != 0 {
+                            self.state.fpscr = value;
+                        } else {
+                            let mut mask = 0_u32;
+                            for field in 0..8 {
+                                if field_mask & (1 << (7 - field)) != 0 {
+                                    mask |= 0xF << (28 - field * 4);
+                                }
+                            }
+                            self.state.fpscr =
+                                (self.state.fpscr & !mask) | (value & mask);
+                        }
+                        if record { self.copy_fpscr_to_cr1(); }
+                        self.state.pc = next_pc;
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+
+                if xo10 == 583 { // mffs
+                    self.state.fpr[frt] = self.state.fpscr as f64;
+                    if record { self.copy_fpscr_to_cr1(); }
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
+                if xo10 == 0 || xo10 == 32 { // fcmpu / fcmpo
+                    let field = ((instruction >> 23) & 0x7) as usize;
+                    let unordered = a.is_nan() || b.is_nan();
+                    self.state.cr[field] = if unordered {
+                        0b0001
+                    } else if a < b {
+                        0b1000
+                    } else if a > b {
+                        0b0100
+                    } else {
+                        0b0010
+                    };
+                    let signaling_nan = [a, b].iter().any(|value| {
+                        let bits = value.to_bits();
+                        (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
+                            && (bits & 0x000F_FFFF_FFFF_FFFF) != 0
+                            && (bits & 0x0008_0000_0000_0000) == 0
+                    });
+                    let invalid = unordered && (xo10 == 32 || signaling_nan);
+                    self.update_fpscr_exceptions(invalid, false, false, false, false, false);
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
+                let mut arithmetic = false;
+                let mut update_status = false;
+                let value = match xo10 {
+                    264 => b.abs(),                 // fabs
+                    72 => b,                        // fmr
+                    136 => -b.abs(),                // fnabs
+                    40 => -b,                       // fneg
+                    12 => (b as f32) as f64,        // frsp
+                    14 | 15 | 814 | 815 => {        // fctiw/z and fctid/z
+                        let rounded = if xo10 == 15 || xo10 == 815 {
+                            b.trunc()
+                        } else {
+                            self.round_fp_to_integer(b)
+                        };
+                        let (min, max) = if xo10 == 14 || xo10 == 15 {
+                            (i32::MIN as f64, i32::MAX as f64)
+                        } else {
+                            (i64::MIN as f64, i64::MAX as f64)
+                        };
+                        if !rounded.is_finite() || rounded < min || rounded >= max {
+                            self.update_fpscr_exceptions(true, false, false, false, false, record);
+                            if xo10 == 14 || xo10 == 15 {
+                                i32::MIN as f64
+                            } else {
+                                i64::MIN as f64
+                            }
+                        } else if xo10 == 14 || xo10 == 15 {
+                            (rounded as i32) as f64
+                        } else {
+                            (rounded as i64) as f64
+                        }
+                    }
+                    846 => (b as i64) as f64,       // fcfid
+                    _ => {
+                        arithmetic = true;
+                        update_status = true;
+                        match xo5 {
+                            21 => a + b,                        // fadd
+                            20 => a - b,                        // fsub
+                            18 => a / b,                        // fdiv
+                            25 => a * c,                        // fmul
+                            23 => if a >= 0.0 { c } else { b }, // fsel
+                            22 => b.sqrt(),                     // fsqrt
+                            24 => (1.0_f32 / (b as f32)) as f64, // fres (single estimate domain)
+                            26 => 1.0 / b.sqrt(),               // frsqrte
+                            29 => a.mul_add(c, b),              // fmadd
+                            28 => a.mul_add(c, -b),             // fmsub
+                            31 => -a.mul_add(c, b),             // fnmadd
+                            30 => -a.mul_add(c, -b),            // fnmsub
+                            _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                        }
+                    }
                 };
 
-                if updates_fpr {
-                    let stored = if single { (value as f32) as f64 } else { value };
-                    self.state.fpr[frt] = stored;
-                    if record {
+                if arithmetic && single {
+                    // Single-precision arithmetic rounds the stored result,
+                    // not the source operands, to IEEE-754 binary32.
+                    let rounded = (value as f32) as f64;
+                    self.state.fpr[frt] = rounded;
+                    if update_status {
+                        self.update_fpscr_for_result(
+                            rounded,
+                            &[a, b, c],
+                            record,
+                        );
+                    }
+                } else {
+                    self.state.fpr[frt] = value;
+                    if update_status {
+                        self.update_fpscr_for_result(value, &[a, b, c], record);
+                    } else if record {
                         self.copy_fpscr_to_cr1();
                     }
                 }
