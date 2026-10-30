@@ -214,6 +214,29 @@ impl PpcInterpreter {
         }
     }
 
+    /// Applies a full MSR write and detects the FE=00 -> FE!=00 transition
+    /// that delivers an already-sticky FPSCR.FEX condition at the next PC.
+    fn apply_msr_write(&mut self, value: u64, next_pc: u32) {
+        let previous_mode = self.fp_exception_mode();
+        self.state.msr = value;
+        let mode = self.fp_exception_mode();
+        self.state.pc = next_pc;
+        if previous_mode == PpcFpExceptionMode::Disabled
+            && mode != PpcFpExceptionMode::Disabled
+            && self.state.fpscr & (1 << 30) != 0
+            && self.pending_exception.is_none()
+        {
+            let causes = self.enabled_fpscr_exception_causes();
+            if causes != 0 {
+                self.pending_exception = Some(PpcException::FloatingPointEnableTransition {
+                    next_pc,
+                    causes,
+                    mode,
+                });
+            }
+        }
+    }
+
     /// Returns an ordinary imprecise FP event that must be delivered before
     /// an FPSCR instruction begins. FPSCR instructions serialize prior
     /// floating-point work, including its enabled-exception handler.
@@ -1347,6 +1370,13 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
+                    83 => {
+                        // mfmsr reads the complete Xenon 64-bit MSR.
+                        if record || instruction & 0x001F_0000 != 0 {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        self.state.gpr[rt_rs] = self.state.msr;
+                    }
                     339 | 467 => {
                         // mfspr / mtspr. The SPR field is split across the
                         // instruction and its two five-bit halves are swapped.
@@ -1370,16 +1400,10 @@ impl PpcInterpreter {
                         }
                         self.state.pc = next_pc;
                     }
-                    146 => {
-                        // Xenon mtmsr writes the full 64-bit MSR. The L=1
-                        // form is reserved for this instruction encoding.
-                        if instruction & 0x001F_0000 != 0 {
-                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
-                        }
-
-                        // mtmsr is context-synchronizing: delayed exceptions
-                        // from earlier instructions must be surfaced before
-                        // this instruction changes the machine state.
+                    146 | 178 => {
+                        // mtmsr and mtmsrd are context-synchronizing: delayed
+                        // imprecise FP events must be surfaced before the MSR
+                        // can be changed.
                         if let Some(
                             exception @ PpcException::FloatingPoint {
                                 mode:
@@ -1392,27 +1416,44 @@ impl PpcInterpreter {
                             return Err(PpcError::PendingException(exception));
                         }
 
-                        // A transition from FE=00 to FE!=00 with sticky FEX
-                        // already asserted raises a program exception at NIA.
-                        let previous_mode = self.fp_exception_mode();
-                        self.state.msr = self.state.gpr[rt_rs];
-                        let mode = self.fp_exception_mode();
-                        self.state.pc = next_pc;
-                        if previous_mode == PpcFpExceptionMode::Disabled
-                            && mode != PpcFpExceptionMode::Disabled
-                            && self.state.fpscr & (1 << 30) != 0
-                            && self.pending_exception.is_none()
-                        {
-                            let causes = self.enabled_fpscr_exception_causes();
-                            if causes != 0 {
-                                self.pending_exception =
-                                    Some(PpcException::FloatingPointEnableTransition {
-                                        next_pc,
-                                        causes,
-                                        mode,
-                                    });
+                        let source = self.state.gpr[rt_rs];
+                        let value = if extended_opcode == 146 {
+                            // mtmsr's L=1 form is reserved in this encoding.
+                            if instruction & 0x001F_0000 != 0 {
+                                return Err(PpcError::UnsupportedInstruction { pc, opcode });
                             }
-                        }
+                            source
+                        } else {
+                            // mtmsrd permits L=0 (full write with architectural
+                            // aliases) and L=1 (update only EE and RI).
+                            if instruction & 0x001E_0000 != 0 {
+                                return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                            }
+                            if instruction & (1 << 16) != 0 {
+                                let mut value = self.state.msr;
+                                const EE: u64 = 1 << 15; // MSR[48]
+                                const RI: u64 = 1 << 1; // MSR[62]
+                                value = (value & !EE) | (source & EE);
+                                value = (value & !RI) | (source & RI);
+                                value
+                            } else {
+                                let mut value = source;
+                                if source & ((1 << 63) | (1 << 62)) != 0 {
+                                    value |= 1 << 63; // MSR[0] <- RS[0] | RS[1].
+                                }
+                                if source & ((1 << 15) | (1 << 14)) != 0 {
+                                    value |= 1 << 15; // MSR[48] <- RS[48] | RS[49].
+                                }
+                                if source & ((1 << 5) | (1 << 14)) != 0 {
+                                    value |= 1 << 5; // MSR[58] <- RS[58] | RS[49].
+                                }
+                                if source & ((1 << 4) | (1 << 14)) != 0 {
+                                    value |= 1 << 4; // MSR[59] <- RS[59] | RS[49].
+                                }
+                                value
+                            }
+                        };
+                        self.apply_msr_write(value, next_pc);
                         return Ok(());
                     }
                     598 => {
@@ -5769,4 +5810,68 @@ mod tests {
         assert_eq!(cpu.state.srr0, 0x1000);
         assert_eq!(cpu.state.gpr[4], 0);
     }
+    #[test]
+    fn mfmsr_reads_the_full_64_bit_machine_state_register() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mfmsr r3 (opcode 31, XO 83).
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (83 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.msr = 0xA123_4567_89AB_CDEF;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[3], 0xA123_4567_89AB_CDEF);
+        assert_eq!(cpu.state.pc, 0x1004);
+    }
+
+    #[test]
+    fn mtmsrd_l_zero_applies_xenon_alias_bits_and_detects_fp_enable_transition() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsrd r3,L=0 (opcode 31, XO 178).
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (178 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] =
+            PPC_MSR_FE0 | PPC_MSR_FE1 | (1 << 62) | (1 << 14);
+        cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // FEX + ZX + ZE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_ne!(cpu.state.msr & (1 << 63), 0); // MSR[0] alias
+        assert_ne!(cpu.state.msr & (1 << 15), 0); // MSR[48] alias
+        assert_ne!(cpu.state.msr & (1 << 5), 0); // MSR[58] alias
+        assert_ne!(cpu.state.msr & (1 << 4), 0); // MSR[59] alias
+        assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
+        assert!(matches!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPointEnableTransition {
+                next_pc: 0x1004,
+                mode: PpcFpExceptionMode::Precise,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn mtmsrd_l_one_updates_only_ee_and_ri() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsrd r3,L=1 (opcode 31, XO 178).
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (3 << 21) | (1 << 16) | (178 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | 0x1234;
+        cpu.state.gpr[3] = (1 << 15) | (1 << 1);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1 | 0x9236);
+        assert_eq!(cpu.state.pc, 0x1004);
+    }
+
+
 }
