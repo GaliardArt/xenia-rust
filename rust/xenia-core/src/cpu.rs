@@ -416,6 +416,20 @@ impl PpcInterpreter {
         })
     }
 
+    fn scale_by_power_of_two(value: f64, exponent: i32) -> f64 {
+        value * 2.0_f64.powi(exponent)
+    }
+
+    fn round_to_single_significand(&self, value: f64) -> f64 {
+        if value == 0.0 || !value.is_finite() {
+            return value;
+        }
+        let exponent = value.abs().log2().floor() as i32;
+        let normalized = Self::scale_by_power_of_two(value, -exponent);
+        let rounded = self.round_to_single(normalized);
+        Self::scale_by_power_of_two(rounded, exponent)
+    }
+
     fn round_to_single(&self, value: f64) -> f64 {
         let nearest = value as f32;
         let nearest_as_double = nearest as f64;
@@ -1825,45 +1839,65 @@ impl PpcInterpreter {
                 if arithmetic && single {
                     // Single-precision arithmetic rounds the stored result,
                     // not the source operands, to IEEE-754 binary32.
-                    let rounded = self.round_to_single(value);
+                    let divide_by_zero = matches!(xo5, 18 | 24 | 26)
+                        && operands.len() >= 2
+                        && operands[1] == 0.0
+                        && operands[0] != 0.0
+                        && operands[0].is_finite();
+                    let overflow = !divide_by_zero
+                        && operands.iter().all(|operand| operand.is_finite())
+                        && (value.is_infinite()
+                            || (value.is_finite() && value.abs() > f32::MAX as f64));
+                    let tiny = value != 0.0 && value.abs() < f32::MIN_POSITIVE as f64;
+                    let overflow_enabled = overflow && self.state.fpscr & (1 << 6) != 0;
+                    let underflow_enabled = tiny && self.state.fpscr & (1 << 5) != 0;
+                    let adjusted_value = if overflow_enabled {
+                        if xo5 == 24 && value.is_infinite() && b.is_finite() && b != 0.0 {
+                            1.0 / Self::scale_by_power_of_two(b, 192)
+                        } else {
+                            Self::scale_by_power_of_two(value, -192)
+                        }
+                    } else if underflow_enabled {
+                        Self::scale_by_power_of_two(value, 192)
+                    } else {
+                        value
+                    };
+                    let adjusted_exponent = overflow_enabled || underflow_enabled;
+                    let rounded = if adjusted_exponent {
+                        self.round_to_single_significand(adjusted_value)
+                    } else {
+                        self.round_to_single(value)
+                    };
                     let previous_fpr = self.state.fpr[frt];
                     self.state.fpr[frt] = rounded;
                     if update_status {
-                        let operands: &[f64] = match xo10 {
-                            12 | 14 | 15 | 814 | 815 | 846 => &[b],
-                            _ => match xo5 {
-                                18 => &[a, b],
-                                22 | 26 => &[b],
-                                24 => &[1.0, b],
-                                25 => &[a, c],
-                                29..=31 => &[a, b, c],
-                                _ => &[a, b],
-                            },
+                        let inexact = if adjusted_exponent {
+                            rounded != adjusted_value
+                        } else {
+                            (value.is_finite() && rounded.is_finite() && rounded != value)
+                                || (overflow && !overflow_enabled)
                         };
-                        let divide_by_zero = matches!(xo5, 18 | 24 | 26)
-                            && operands.len() >= 2
-                            && operands[1] == 0.0
-                            && operands[0] != 0.0
-                            && operands[0].is_finite();
-                        let overflow = !divide_by_zero
-                            && operands.iter().all(|operand| operand.is_finite())
-                            && (value.is_infinite()
-                                || (value.is_finite() && value.abs() > f32::MAX as f64));
-                        let fraction_rounded = (value.is_finite()
-                            && rounded.abs() > value.abs())
-                            || (value.is_infinite()
-                                && rounded.is_infinite()
-                                && !divide_by_zero
-                                && operands.iter().all(|operand| operand.is_finite()));
+                        let fraction_rounded = if overflow {
+                            false
+                        } else if adjusted_exponent {
+                            rounded.abs() > adjusted_value.abs()
+                        } else {
+                            (value.is_finite() && rounded.abs() > value.abs())
+                                || (value.is_infinite()
+                                    && rounded.is_infinite()
+                                    && !divide_by_zero
+                                    && operands.iter().all(|operand| operand.is_finite()))
+                        };
+                        let underflow = tiny && (underflow_enabled || inexact);
                         let invalid_enabled = self.update_fpscr_for_result(
                             rounded,
                             operands,
                             source_signaling_nan,
                             xo5,
-                            value.is_finite() && rounded.is_finite() && rounded != value
-                                || overflow,
+                            inexact,
                             fraction_rounded,
                             overflow,
+                            underflow,
                             true,
                             record,
                         );
