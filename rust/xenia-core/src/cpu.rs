@@ -1088,7 +1088,9 @@ impl PpcInterpreter {
                         let field = ((instruction >> 23) & 0x7) as usize;
                         let immediate = ((instruction >> 12) & 0xF) as u8;
                         self.write_fpscr_field(field, immediate);
-                        if record { self.copy_fpscr_to_cr1(); }
+                        if record {
+                            self.copy_fpscr_to_cr1();
+                        }
                         self.state.pc = next_pc;
                         return Ok(());
                     }
@@ -1107,7 +1109,9 @@ impl PpcInterpreter {
                             }
                             self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
-                        if record { self.copy_fpscr_to_cr1(); }
+                        if record {
+                            self.copy_fpscr_to_cr1();
+                        }
                         self.state.pc = next_pc;
                         return Ok(());
                     }
@@ -1117,7 +1121,9 @@ impl PpcInterpreter {
                 if xo10 == 583 {
                     // mffs
                     self.state.fpr[frt] = self.state.fpscr as f64;
-                    if record { self.copy_fpscr_to_cr1(); }
+                    if record {
+                            self.copy_fpscr_to_cr1();
+                        }
                     self.state.pc = next_pc;
                     return Ok(());
                 }
@@ -1155,7 +1161,8 @@ impl PpcInterpreter {
                     136 => -b.abs(),         // fnabs
                     40 => -b,                // fneg
                     12 => (b as f32) as f64, // frsp
-                    14 | 15 | 814 | 815 => { // fctiw/z and fctid/z
+                    14 | 15 | 814 | 815 => {
+                        // fctiw/z and fctid/z
                         let rounded = if xo10 == 15 || xo10 == 815 {
                             b.trunc()
                         } else {
@@ -1184,12 +1191,14 @@ impl PpcInterpreter {
                         arithmetic = true;
                         update_status = true;
                         match xo5 {
-                            21 => a + b,                        // fadd
-                            20 => a - b,                        // fsub
-                            18 => a / b,                        // fdiv
-                            25 => a * c,                        // fmul
-                            23 => if a >= 0.0 { c } else { b }, // fsel
-                            22 => b.sqrt(),                     // fsqrt
+                            21 => a + b, // fadd
+                            20 => a - b, // fsub
+                            18 => a / b, // fdiv
+                            25 => a * c, // fmul
+                            23 => {
+                                if a >= 0.0 { c } else { b }
+                            } // fsel
+                            22 => b.sqrt(), // fsqrt
                             24 => (1.0_f32 / (b as f32)) as f64, // fres (single estimate domain)
                             26 => 1.0 / b.sqrt(),               // frsqrte
                             29 => a.mul_add(c, b),              // fmadd
