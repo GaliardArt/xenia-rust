@@ -1246,9 +1246,22 @@ impl PpcInterpreter {
                 let right = self.state.gpr[rb];
                 match extended_opcode {
                     146 => {
-                        // mtmsr is context-synchronizing. A transition from
-                        // FE=00 to FE!=00 with sticky FEX already asserted
-                        // raises a program exception at the next instruction.
+                        // mtmsr is context-synchronizing: delayed exceptions
+                        // from earlier instructions must be surfaced before
+                        // this instruction changes the machine state.
+                        if let Some(
+                            exception @ PpcException::FloatingPoint {
+                                mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                                    | PpcFpExceptionMode::ImpreciseRecoverable,
+                                ..
+                            },
+                        ) = self.pending_exception
+                        {
+                            return Err(PpcError::PendingException(exception));
+                        }
+
+                        // A transition from FE=00 to FE!=00 with sticky FEX
+                        // already asserted raises a program exception at NIA.
                         let previous_mode = self.fp_exception_mode();
                         self.state.msr = self.state.gpr[rt_rs] as u32;
                         let mode = self.fp_exception_mode();
@@ -5046,6 +5059,58 @@ mod tests {
         };
         assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1);
         assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.pending_exception(), Some(pending));
+        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.state.gpr[4], 0);
+    }
+
+    #[test]
+    fn mtmsr_surfaces_prior_imprecise_fp_event_before_changing_msr() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsr r3
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = (PPC_MSR_FE0 | PPC_MSR_FE1) as u64;
+        cpu.state.msr = PPC_MSR_FE1;
+        cpu.pending_exception = Some(PpcException::FloatingPoint {
+            instruction_pc: 0x0FFC,
+            causes: (1 << 26) | (1 << 25),
+            mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
+        });
+        let pending = cpu.pending_exception();
+
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending.unwrap()))
+        );
+        assert_eq!(cpu.state.pc, 0x1000);
+        assert_eq!(cpu.state.msr, PPC_MSR_FE1);
+    }
+
+    #[test]
+    fn mtmsr_fe_imprecise_transition_is_still_delivered_at_next_boundary() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // mtmsr r3; addi r4,r4,1
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (3 << 21) | (146 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = PPC_MSR_FE1 as u64;
+        cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // ZX + ZE => FEX
+
+        cpu.step(&mut memory).unwrap();
+
+        let pending = PpcException::FloatingPointEnableTransition {
+            next_pc: 0x1004,
+            causes: 1 << 26,
+            mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
+        };
         assert_eq!(cpu.pending_exception(), Some(pending));
         assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
         assert_eq!(cpu.state.pc, 0x1004);
