@@ -438,6 +438,51 @@ mod tests {
     }
 
     #[test]
+    fn add_and_subf_execute_x_form_arithmetic() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // add r5,r3,r4
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (5 << 21) | (3 << 16) | (4 << 11) | (266 << 1),
+        );
+        // subf r6,r3,r4 => r4-r3
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (40 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 7;
+        cpu.state.gpr[4] = 12;
+
+        cpu.step(&mut memory).unwrap();
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[5], 19);
+        assert_eq!(cpu.state.gpr[6], 5);
+    }
+
+    #[test]
+    fn rlwinm_rotates_and_masks_word_results() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // rlwinm r4,r3,8,8,23
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (21 << 26) | (3 << 21) | (4 << 16) | (8 << 11) | (8 << 6) | (23 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1234_5678;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[4], 0x0034_5678);
+    }
+
+    #[test]
     fn stw_and_lwz_round_trip_big_endian_memory() {
         let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
         // stw r3, 16(r0)
