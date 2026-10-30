@@ -1309,6 +1309,39 @@ mod tests {
     }
 
     #[test]
+    fn vmx_byte_halfword_and_logic_operations_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode_vx(3, 1, 2, 0x000)); // vaddubm
+        put_instruction(&mut memory, 0x1004, encode_vx(4, 1, 2, 0x040)); // vadduhm
+        put_instruction(&mut memory, 0x1008, encode_vx(5, 1, 2, 0x404)); // vand
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        for lane in 0..16 {
+            cpu.state.vr[1][lane] = lane as u8;
+            cpu.state.vr[2][lane] = 1;
+        }
+
+        for _ in 0..3 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.vr[3], std::array::from_fn(|i| (i + 1) as u8));
+        assert_eq!(
+            cpu.state.vr[4],
+            [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+             0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10]
+        );
+        assert_eq!(
+            cpu.state.vr[5],
+            [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+        );
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
