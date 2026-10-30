@@ -478,6 +478,14 @@ impl PpcInterpreter {
         }
     }
 
+    fn narrow_single_for_store(&self, value: f64) -> f32 {
+        if value.is_nan() {
+            Self::narrow_single_preserving_nan(value)
+        } else {
+            self.round_to_single(value) as f32
+        }
+    }
+
     fn narrow_single_preserving_nan(value: f64) -> f32 {
         let bits = value.to_bits();
         let exponent = bits & 0x7FF0_0000_0000_0000;
@@ -1284,7 +1292,7 @@ impl PpcInterpreter {
                             memory
                                 .write_u32_be(
                                     GuestAddress(address as u32),
-                                    Self::narrow_single_preserving_nan(self.state.fpr[rt_rs])
+                                    self.narrow_single_for_store(self.state.fpr[rt_rs])
                                         .to_bits(),
                                 )
                                 .map_err(Into::into)?;
@@ -2972,6 +2980,49 @@ mod tests {
 
         assert_eq!(cpu.state.fpr[1], f32::from_bits(1) as f64);
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_4000); // positive single denormal
+    }
+
+    #[test]
+    fn stfs_uses_fpscr_rounding_without_changing_fpscr() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // stfs f1,0(r0)
+        put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
+        cpu.state.fpscr = 0b10; // toward +infinity
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x1000)).unwrap(),
+            f32::from_bits(0x3F80_0001).to_bits()
+        );
+        assert_eq!(cpu.state.fpscr, 0b10); // stores do not update FPSCR
+    }
+
+    #[test]
+    fn stfsx_uses_fpscr_rounding_for_indexed_stores() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // stfsx f1,r0,r2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (1 << 21) | (2 << 11) | (663 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[2] = 4;
+        cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
+        cpu.state.fpscr = 0b10;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x1004)).unwrap(),
+            f32::from_bits(0x3F80_0001).to_bits()
+        );
+        assert_eq!(cpu.state.fpscr, 0b10);
     }
 
     #[test]
