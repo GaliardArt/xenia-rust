@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_section_bytes_and_enforces_executable_permissions() {
+    fn maps_page_descriptors_and_enforces_executable_permissions() {
         let loaded = load_xex2_image(&valid_xex()).unwrap();
         let mut memory = GuestAddressSpace::new();
         loaded.map_into(&mut memory).unwrap();
@@ -525,7 +525,7 @@ mod tests {
             &[0xA5; 4]
         );
         assert_eq!(
-            memory.read_bytes(GuestAddress(0x8200_0FFF), 2),
+            memory.read_bytes(GuestAddress(0x8200_1FFF), 2),
             Err(AddressSpaceError::Memory(crate::memory::MemoryError::OutOfBounds))
         );
         assert_eq!(
@@ -538,6 +538,48 @@ mod tests {
                 GuestAddress(0x8200_0200)
             ),
             Ok(0xA5A5_A5A5)
+        );
+    }
+
+    #[test]
+    fn applies_code_data_and_read_only_page_permissions() {
+        let mut loaded = load_xex2_image(&valid_xex()).unwrap();
+        loaded.image.resize(0x3000, 0);
+        loaded.security.page_descriptors = vec![
+            crate::security::XexPageDescriptor {
+                section_type: 1,
+                page_count: 1,
+                digest: [0; 20],
+            },
+            crate::security::XexPageDescriptor {
+                section_type: 2,
+                page_count: 1,
+                digest: [0; 20],
+            },
+            crate::security::XexPageDescriptor {
+                section_type: 3,
+                page_count: 1,
+                digest: [0; 20],
+            },
+        ];
+        let mut memory = GuestAddressSpace::new();
+        loaded.map_into(&mut memory).unwrap();
+
+        assert_eq!(
+            memory.write_u8(GuestAddress(0x8200_0000), 1),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+        assert_eq!(memory.write_u8(GuestAddress(0x8200_1000), 2), Ok(()));
+        assert_eq!(
+            memory.write_u8(GuestAddress(0x8200_2000), 3),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+        assert_eq!(
+            crate::memory::GuestMemoryAccess::fetch_u32_be(
+                &memory,
+                GuestAddress(0x8200_1000)
+            ),
+            Err(AddressSpaceError::PermissionDenied)
         );
     }
 
