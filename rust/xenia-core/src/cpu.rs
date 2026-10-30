@@ -444,7 +444,9 @@ impl PpcInterpreter {
                                 .map_err(Into::into)?
                                 as u64,
                             343 | 375 => {
-                                (memory.read_u16_be(GuestAddress(address)).map_err(Into::into)? as i16
+                                (memory
+                                    .read_u16_be(GuestAddress(address))
+                                    .map_err(Into::into)? as i16
                                     as i64) as u64
                             }
                             23 | 55 => memory
@@ -462,7 +464,11 @@ impl PpcInterpreter {
                         if update && ra == 0 {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         match xo {
                             215 | 247 => memory
@@ -476,7 +482,9 @@ impl PpcInterpreter {
                                 .map_err(Into::into)?,
                             _ => unreachable!(),
                         }
-                        if update { self.state.gpr[ra] = address as u64; }
+                        if update {
+                            self.state.gpr[ra] = address as u64;
+                        }
                     }
                     28 | 316 | 444 => {
                         let value = match extended_opcode {
