@@ -1163,6 +1163,47 @@ mod tests {
     }
 
     #[test]
+    fn scalar_floating_point_arithmetic_and_compare_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // fadd f1,f2,f3; fadds f4,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (59 << 26) | (4 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        // fmul f5,f2,f4; fcmpo cr2,f1,f3
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (63 << 26) | (5 << 21) | (2 << 16) | (4 << 6) | (25 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x100C,
+            (63 << 26) | (2 << 23) | (1 << 16) | (3 << 11) | (32 << 1),
+        );
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.5;
+        cpu.state.fpr[3] = 2.25;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.fpr[1], 3.75);
+        assert_eq!(cpu.state.fpr[4], (3.75_f32) as f64);
+        assert_eq!(cpu.state.fpr[5], 5.625);
+        assert_eq!(cpu.state.cr[2], 0b0100);
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
