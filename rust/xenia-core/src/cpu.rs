@@ -1382,13 +1382,19 @@ mod tests {
         cpu.state.gpr[3] = 5;
         cpu.state.xer = 1 << 29; // CA=1
 
-        for _ in 0..4 {
-            cpu.step(&mut memory).unwrap();
-        }
-
+        cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[5], 5); // 5 + 1 - 1
+
+        cpu.state.xer |= 1 << 29;
+        cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[6], 6); // 5 + 1
+
+        cpu.state.xer |= 1 << 29;
+        cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[7], !5_u64); // ~5 + 1 - 1
+
+        cpu.state.xer |= 1 << 29;
+        cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[8], !5_u64 + 1); // ~5 + 1
     }
 
