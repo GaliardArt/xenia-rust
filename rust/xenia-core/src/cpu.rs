@@ -1246,6 +1246,12 @@ impl PpcInterpreter {
                 let right = self.state.gpr[rb];
                 match extended_opcode {
                     146 => {
+                        // The 32-bit Xenon MSR model implements L=0. L=1
+                        // selects the distinct 64-bit MSR update form.
+                        if instruction & (1 << 16) != 0 {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+
                         // mtmsr is context-synchronizing: delayed exceptions
                         // from earlier instructions must be surfaced before
                         // this instruction changes the machine state.
@@ -5033,6 +5039,27 @@ mod tests {
                 mode: PpcFpExceptionMode::ImpreciseRecoverable,
             })
         );
+    }
+
+    #[test]
+    fn mtmsr_l_form_is_not_misinterpreted_as_a_full_msr_write() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsr r3,1 (L=1)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (3 << 21) | (1 << 16) | (146 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = (PPC_MSR_FE0 | PPC_MSR_FE1) as u64;
+
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::UnsupportedInstruction { pc: 0x1000, opcode: 31 })
+        );
+        assert_eq!(cpu.state.msr, 0);
+        assert_eq!(cpu.state.pc, 0x1000);
     }
 
     #[test]
