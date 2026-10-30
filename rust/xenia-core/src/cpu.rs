@@ -1201,17 +1201,17 @@ impl PpcInterpreter {
                     // fcmpu / fcmpo
                     let field = ((instruction >> 23) & 0x7) as usize;
                     let unordered = a.is_nan() || b.is_nan();
-                    let condition = if unordered {
-                        0b1_0001
+                    let (cr_condition, fprf_condition) = if unordered {
+                        (0b0001, 0b1_0001)
                     } else if a < b {
-                        0b0_1000
+                        (0b1000, 0b0_1000)
                     } else if a > b {
-                        0b0_0100
+                        (0b0100, 0b0_0100)
                     } else {
-                        0b0_0010
+                        (0b0010, 0b0_0010)
                     };
-                    self.state.cr[field] = condition as u8;
-                    self.set_fprf_condition(condition);
+                    self.state.cr[field] = cr_condition;
+                    self.set_fprf_condition(fprf_condition);
                     let signaling_nan = [a, b].iter().any(|value| {
                         let bits = value.to_bits();
                         (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
