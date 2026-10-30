@@ -1987,7 +1987,7 @@ impl PpcInterpreter {
                         return Err(PpcError::PendingException(exception));
                     }
                 }
-                if (single && !matches!(xo5, 18 | 20 | 21 | 22 | 24 | 25 | 28..=31))
+                if (single && !matches!(xo5, 18 | 20 | 21 | 22 | 24 | 25 | 26 | 28..=31))
                     || (!single && xo10 == 24)
                 {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
@@ -5458,6 +5458,29 @@ mod tests {
         assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
         assert_eq!(cpu.state.fpscr & (1 << 31), 0); // FX comes only from source bit 31
+    }
+
+
+    #[test]
+    fn frsqrtes_executes_with_single_precision_source_and_result() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // frsqrtes f1,f2 (opcode 59, XO 26).
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 11) | (26 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        // This value rounds to 4.0 in binary32; the estimate must therefore
+        // be computed from the single-precision source, not the f64 payload.
+        cpu.state.fpr[2] = 4.0 + 2.0_f64.powi(-22);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 0.5);
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.state.fpscr & ((1 << 28) | (1 << 27) | (1 << 26) | (1 << 25)), 0);
     }
 
 
