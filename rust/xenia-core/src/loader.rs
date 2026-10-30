@@ -342,6 +342,8 @@ fn read_u32_be(bytes: &[u8], offset: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{XEX_HEADER_FILE_FORMAT_INFO, XexLoadError, load_xex2_image};
+    use crate::address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
+    use crate::memory::GuestAddress;
 
     fn put_u16_le(bytes: &mut [u8], offset: usize, value: u16) {
         bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -475,6 +477,72 @@ mod tests {
                 .all(|byte| *byte == 0)
         );
         assert_eq!(loaded.layout.entry_point, 0x8200_1000);
+    }
+
+    #[test]
+    fn maps_section_bytes_and_enforces_executable_permissions() {
+        let loaded = load_xex2_image(&valid_xex()).unwrap();
+        let mut memory = GuestAddressSpace::new();
+        loaded.map_into(&mut memory).unwrap();
+
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x8200_1000), 4).unwrap(),
+            &[0xA5; 4]
+        );
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x8200_10FC), 4).unwrap(),
+            &[0xA5; 4]
+        );
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x8200_10FF), 2),
+            Err(AddressSpaceError::Memory(crate::memory::MemoryError::OutOfBounds))
+        );
+        assert_eq!(
+            memory.write_u8(GuestAddress(0x8200_1000), 0),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+        assert_eq!(
+            crate::memory::GuestMemoryAccess::fetch_u32_be(
+                &memory,
+                GuestAddress(0x8200_1000)
+            ),
+            Ok(0xA5A5_A5A5)
+        );
+    }
+
+    #[test]
+    fn failed_mapping_does_not_mutate_existing_address_space() {
+        let loaded = load_xex2_image(&valid_xex()).unwrap();
+        let mut memory = GuestAddressSpace::new();
+        memory
+            .map(
+                GuestAddress(0x8200_1000),
+                0x100,
+                MemoryPermissions::READ_WRITE,
+            )
+            .unwrap();
+        memory.write_u8(GuestAddress(0x8200_1000), 0x7B).unwrap();
+
+        assert!(matches!(
+            loaded.map_into(&mut memory),
+            Err(XexLoadError::AddressSpace(AddressSpaceError::OverlappingRegion))
+        ));
+        assert_eq!(memory.read_u8(GuestAddress(0x8200_1000)), Ok(0x7B));
+    }
+
+    #[test]
+    fn rejects_section_data_outside_decompressed_image() {
+        let mut loaded = load_xex2_image(&valid_xex()).unwrap();
+        loaded.pe.sections[0].raw_pointer = u32::MAX;
+        let mut memory = GuestAddressSpace::new();
+        assert_eq!(
+            loaded.map_into(&mut memory),
+            Err(XexLoadError::SectionDataOutOfBounds)
+        );
+        assert_eq!(
+            memory.read_u8(GuestAddress(0x8200_1000)),
+            Err(AddressSpaceError::UnmappedAddress)
+        );
     }
 
     #[test]
