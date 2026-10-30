@@ -76,10 +76,13 @@ The current loader extension is being revalidated after its final allocation gua
 - [ ] Establish logging, errors, and diagnostics conventions.
 
 ### M3 — CPU interpreter
-- [ ] Define Xenon/PowerPC architectural state and instruction decoding.
-- [ ] Implement instruction groups incrementally with reference tests.
-- [ ] Test branches, flags, exceptions, loads/stores, and floating-point behavior.
-- [ ] Never silently treat unsupported instructions as successful.
+- [x] Establish the initial Xenon/PowerPC state model and deterministic step/fetch loop.
+- [x] Implement initial integer immediate, logical, compare, branch, word load/store, byte load/store, and halfword load/store instruction groups.
+- [x] Keep unsupported opcodes explicit and add focused instruction tests.
+- [ ] Complete branch/CR/XER edge semantics and architectural exception behavior.
+- [ ] Expand integer instruction coverage (update/indexed forms, rotate/shift, multiply/divide, arithmetic overflow/carry).
+- [ ] Implement floating-point and VMX/Altivec behavior with reference vectors.
+- [ ] Differentially validate broader instruction coverage against the C++ reference.
 
 ### M4 — Kernel and runtime
 - [ ] Model threads, scheduling, synchronization, virtual objects, and guest API dispatch.
@@ -99,12 +102,15 @@ The current loader extension is being revalidated after its final allocation gua
 ## Current implementation status
 
 The xenia-core crate now contains a contiguous, bounds-checked memory region
-with big-endian 32-bit reads/writes; a non-overlapping, permissioned region-based
-address space with protect/unmap operations; a memory-access interface shared by
-CPU and memory models, including execute-permission checks for instruction fetch; a
-deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
-beq/bne forms, lwz and stw); and defensive XEX2 fixed-header/optional-header and Xbox PE32 header/section
-parsers. Both parsers have malformed-input tests; the CLI can inspect XEX2 and
+with big-endian byte, halfword and word access; a non-overlapping, permissioned
+region-based address space with protect/unmap operations; a memory-access
+interface shared by CPU and memory models, including execute-permission checks
+for instruction fetch; and a deterministic but still partial PPC interpreter.
+Its current instruction groups include addi/addis, mulli, subfic/addic, signed and
+unsigned compares, rlwinm, immediate and register logical operations, add/subf,
+conditional and unconditional branches (including LR/CTR branch forms), and
+byte/halfword/word loads and stores (lbz, lhz, lha, stb, sth, lwz, stw).
+ Both parsers have malformed-input tests; the CLI can inspect XEX2 and
 PE metadata. Unsupported CPU opcodes fail explicitly.
 This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
 page-granular MMU semantics, AES decryption, normal/LZX compression, XEX patching,
