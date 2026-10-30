@@ -112,7 +112,6 @@ pub fn plan_image_layout(image: &XboxPeImage, load_base: u32) -> Result<ImageLay
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{LayoutError, plan_image_layout};
