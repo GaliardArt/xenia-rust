@@ -5725,5 +5725,4 @@ mod tests {
         assert_eq!(cpu.state.pc, 0x1004);
     }
 
-
 }
