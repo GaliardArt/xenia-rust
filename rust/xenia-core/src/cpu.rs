@@ -1367,6 +1367,48 @@ mod tests {
     }
 
     #[test]
+    fn vmx_aligned_load_store_round_trip_vector_bytes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 64);
+        // lvx v1,r3,r4; stvx v1,r5,r6
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (1 << 21) | (3 << 16) | (4 << 11) | (103 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (31 << 26) | (1 << 21) | (5 << 16) | (6 << 11) | (231 << 1),
+        );
+        for index in 0..16 {
+            memory
+                .write_u8(GuestAddress(0x1010 + index), (0xA0 + index) as u8)
+                .unwrap();
+        }
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1013;
+        cpu.state.gpr[4] = 0;
+        cpu.state.gpr[5] = 0x1023;
+        cpu.state.gpr[6] = 0;
+
+        cpu.step(&mut memory).unwrap();
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.state.vr[1],
+            std::array::from_fn(|index| (0xA0 + index) as u8)
+        );
+        for index in 0..16 {
+            assert_eq!(
+                memory.read_u8(GuestAddress(0x1020 + index)),
+                Ok((0xA0 + index) as u8)
+            );
+        }
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
