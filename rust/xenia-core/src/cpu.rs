@@ -558,10 +558,18 @@ impl PpcInterpreter {
                 }
                 let address = (self.state.gpr[ra] as u32).wrapping_add(immediate as u32);
                 let value = match opcode {
-                    33 => memory.read_u32_be(GuestAddress(address)).map_err(Into::into)? as u64,
+                    33 => memory
+                        .read_u32_be(GuestAddress(address))
+                        .map_err(Into::into)? as u64,
                     35 => memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64,
-                    41 => memory.read_u16_be(GuestAddress(address)).map_err(Into::into)? as u64,
-                    43 => (memory.read_u16_be(GuestAddress(address)).map_err(Into::into)? as i16 as i64) as u64,
+                    41 => memory
+                        .read_u16_be(GuestAddress(address))
+                        .map_err(Into::into)? as u64,
+                    43 => {
+                        (memory
+                            .read_u16_be(GuestAddress(address))
+                            .map_err(Into::into)? as i16 as i64) as u64
+                    }
                     _ => unreachable!(),
                 };
                 self.state.gpr[rt_rs] = value;
@@ -588,9 +596,15 @@ impl PpcInterpreter {
                 }
                 let address = (self.state.gpr[ra] as u32).wrapping_add(immediate as u32);
                 match opcode {
-                    37 => memory.write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32).map_err(Into::into)?,
-                    39 => memory.write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8).map_err(Into::into)?,
-                    45 => memory.write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16).map_err(Into::into)?,
+                    37 => memory
+                        .write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)
+                        .map_err(Into::into)?,
+                    39 => memory
+                        .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
+                        .map_err(Into::into)?,
+                    45 => memory
+                        .write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
+                        .map_err(Into::into)?,
                     _ => unreachable!(),
                 }
                 self.state.gpr[ra] = address as u64;
