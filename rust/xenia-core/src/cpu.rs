@@ -240,6 +240,54 @@ impl PpcInterpreter {
         }
     }
 
+    /// Checks sticky FPSCR state after an explicit FPSCR write. Unlike an
+    /// arithmetic instruction, mtfs* can enable a previously recorded cause
+    /// or set a cause and its enable bit in the same instruction.
+    fn queue_fpscr_write_exception(&mut self, instruction_pc: u32) {
+        const FEX: u32 = 1 << 30;
+        const VX: u32 = 1 << 29;
+        const OX: u32 = 1 << 28;
+        const UX: u32 = 1 << 27;
+        const ZX: u32 = 1 << 26;
+        const XX: u32 = 1 << 25;
+        const VE: u32 = 1 << 7;
+        const OE: u32 = 1 << 6;
+        const UE: u32 = 1 << 5;
+        const ZE: u32 = 1 << 4;
+        const XE: u32 = 1 << 3;
+        const VX_CAUSES: u32 = 0x01F8_0700;
+
+        if self.state.fpscr & FEX == 0 || self.pending_exception.is_some() {
+            return;
+        }
+
+        let mut causes = 0;
+        if self.state.fpscr & (VX | VX_CAUSES) != 0 && self.state.fpscr & VE != 0 {
+            causes |= (self.state.fpscr & VX_CAUSES) | VX;
+        }
+        if self.state.fpscr & OX != 0 && self.state.fpscr & OE != 0 {
+            causes |= OX;
+        }
+        if self.state.fpscr & UX != 0 && self.state.fpscr & UE != 0 {
+            causes |= UX;
+        }
+        if self.state.fpscr & ZX != 0 && self.state.fpscr & ZE != 0 {
+            causes |= ZX;
+        }
+        if self.state.fpscr & XX != 0 && self.state.fpscr & XE != 0 {
+            causes |= XX;
+        }
+
+        let mode = self.fp_exception_mode();
+        if causes != 0 && mode != PpcFpExceptionMode::Disabled {
+            self.pending_exception = Some(PpcException::FloatingPoint {
+                instruction_pc,
+                causes,
+                mode,
+            });
+        }
+    }
+
     fn update_fpscr_exceptions(&mut self, exceptions: FpExceptionFlags, record: bool) {
         const FX: u32 = 1 << 31;
         const VX: u32 = 1 << 29;
@@ -903,8 +951,11 @@ impl PpcInterpreter {
             // FEX and VX are computed summaries, not writable field bits.
             mask &= !((1 << 30) | (1 << 29));
         }
+        let previous_fpscr = self.state.fpscr;
         self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) << shift) & mask);
+        self.set_fx_for_new_exception_bits(previous_fpscr);
         self.refresh_fpscr_fex();
+        self.queue_fpscr_write_exception(self.state.pc);
     }
 
     fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
@@ -1838,6 +1889,7 @@ impl PpcInterpreter {
                             }
                         }
                         self.refresh_fpscr_fex();
+                        self.queue_fpscr_write_exception(pc);
                         if record {
                             self.copy_fpscr_to_cr1();
                         }
@@ -1857,6 +1909,7 @@ impl PpcInterpreter {
                     }
                     711 => {
                         // mtfsf FM,FRB (and the Xenia-supported L form)
+                        let previous_fpscr = self.state.fpscr;
                         let field_mask = ((instruction >> 17) & 0xFF) as u8;
                         let value = self.state.fpr[frb].to_bits() as u32;
                         if instruction & (1 << 16) != 0 {
@@ -1873,7 +1926,9 @@ impl PpcInterpreter {
                             mask &= !((1 << 30) | (1 << 29));
                             self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
+                        self.set_fx_for_new_exception_bits(previous_fpscr);
                         self.refresh_fpscr_fex();
+                        self.queue_fpscr_write_exception(pc);
                         if record {
                             self.copy_fpscr_to_cr1();
                         }
