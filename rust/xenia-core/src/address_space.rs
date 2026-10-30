@@ -3,6 +3,8 @@
 //! MMIO routing, page-level protection changes, aliases, physical mappings, and
 //! invalidation callbacks are intentionally not implemented yet.
 
+use core::fmt;
+
 use crate::memory::{GuestAddress, GuestMemory, MemoryError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,6 +47,22 @@ pub enum AddressSpaceError {
     PermissionDenied,
     Memory(MemoryError),
 }
+
+impl fmt::Display for AddressSpaceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyRegion => f.write_str("cannot map an empty guest region"),
+            Self::AddressRangeOverflow => f.write_str("guest region exceeds address space"),
+            Self::OverlappingRegion => f.write_str("guest region overlaps an existing mapping"),
+            Self::RegionNotFound => f.write_str("guest region was not found"),
+            Self::UnmappedAddress => f.write_str("guest address is not mapped"),
+            Self::PermissionDenied => f.write_str("guest memory permission denied"),
+            Self::Memory(error) => write!(f, "guest memory: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for AddressSpaceError {}
 
 impl From<MemoryError> for AddressSpaceError {
     fn from(value: MemoryError) -> Self {
