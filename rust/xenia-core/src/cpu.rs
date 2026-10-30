@@ -302,6 +302,40 @@ impl PpcInterpreter {
                 }
                 self.state.pc = next_pc;
             }
+            // lbz RT,D(RA) — load a zero-extended byte.
+            34 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let address = base.wrapping_add(immediate as u32);
+                self.state.gpr[rt_rs] = memory
+                    .read_u8(GuestAddress(address))
+                    .map_err(Into::into)? as u64;
+                self.state.pc = next_pc;
+            }
+            // lhz/lha RT,D(RA) — load an unsigned/signed big-endian halfword.
+            40 | 42 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let address = base.wrapping_add(immediate as u32);
+                let value = memory.read_u16_be(GuestAddress(address)).map_err(Into::into)?;
+                self.state.gpr[rt_rs] = if opcode == 42 {
+                    (value as i16 as i64) as u64
+                } else {
+                    value as u64
+                };
+                self.state.pc = next_pc;
+            }
+            // stb/sth RS,D(RA) — store the low byte/halfword in guest big-endian order.
+            38 | 44 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let address = base.wrapping_add(immediate as u32);
+                if opcode == 38 {
+                    memory.write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
+                        .map_err(Into::into)?;
+                } else {
+                    memory.write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
+                        .map_err(Into::into)?;
+                }
+                self.state.pc = next_pc;
+            }
             // lwz RT,D(RA) — load a zero-extended 32-bit word.
             32 => {
                 let base = if ra == 0 {
@@ -408,6 +442,36 @@ mod tests {
 
         assert_eq!(cpu.state.gpr[5], 0x12FF);
         assert_eq!(cpu.state.pc, 0x1004);
+    }
+
+    #[test]
+    fn byte_and_halfword_load_store_preserve_big_endian_semantics() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 32);
+        // lbz r3,0(r4); lhz r5,2(r4); lha r6,4(r4); stb r3,6(r4); sth r5,8(r4)
+        put_instruction(&mut memory, 0x1000, (34 << 26) | (3 << 21) | (4 << 16));
+        put_instruction(&mut memory, 0x1004, (40 << 26) | (5 << 21) | (4 << 16) | 2);
+        put_instruction(&mut memory, 0x1008, (42 << 26) | (6 << 21) | (4 << 16) | 4);
+        put_instruction(&mut memory, 0x100C, (38 << 26) | (3 << 21) | (4 << 16) | 6);
+        put_instruction(&mut memory, 0x1010, (44 << 26) | (5 << 21) | (4 << 16) | 8);
+        memory.write_u8(GuestAddress(0x1014), 0xAB).unwrap();
+        memory.write_u8(GuestAddress(0x1016), 0xFF).unwrap();
+        memory.write_u8(GuestAddress(0x1017), 0x80).unwrap();
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[4] = 0x1014;
+
+        for _ in 0..5 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[3], 0xAB);
+        assert_eq!(cpu.state.gpr[5], 0xFF80);
+        assert_eq!(cpu.state.gpr[6], (-128_i64) as u64);
+        assert_eq!(memory.read_u8(GuestAddress(0x101A)), Ok(0xAB));
+        assert_eq!(memory.read_u8(GuestAddress(0x101C)), Ok(0xFF));
+        assert_eq!(memory.read_u8(GuestAddress(0x101D)), Ok(0x80));
+        assert_eq!(cpu.state.pc, 0x1014);
     }
 
     #[test]
