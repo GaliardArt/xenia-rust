@@ -261,7 +261,10 @@ impl PpcInterpreter {
         let underflow = (value == 0.0 || value.is_subnormal()) && inexact;
         let mut invalid_cause = 0;
         if invalid {
-            if operands.iter().any(|operand| Self::is_signaling_nan(*operand)) {
+            if operands
+                .iter()
+                .any(|operand| Self::is_signaling_nan(*operand))
+            {
                 invalid_cause |= 1 << 24; // VXSNAN
             } else {
                 match operation {
