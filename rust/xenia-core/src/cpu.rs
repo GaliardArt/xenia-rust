@@ -176,11 +176,12 @@ impl PpcInterpreter {
         if raised != 0 {
             self.state.fpscr |= FX | raised;
         }
-        let enabled = ((invalid && self.state.fpscr & VE != 0)
-            || (overflow && self.state.fpscr & OE != 0)
-            || (underflow && self.state.fpscr & UE != 0)
-            || (div_zero && self.state.fpscr & ZE != 0)
-            || (inexact && self.state.fpscr & XE != 0));
+        // FEX is derived from sticky exception status bits and their enables.
+        let enabled = ((self.state.fpscr & VX != 0 && self.state.fpscr & VE != 0)
+            || (self.state.fpscr & OX != 0 && self.state.fpscr & OE != 0)
+            || (self.state.fpscr & UX != 0 && self.state.fpscr & UE != 0)
+            || (self.state.fpscr & ZX != 0 && self.state.fpscr & ZE != 0)
+            || (self.state.fpscr & XX != 0 && self.state.fpscr & XE != 0));
         if enabled {
             self.state.fpscr |= FEX;
         } else {
@@ -1211,7 +1212,15 @@ impl PpcInterpreter {
                 } else {
                     self.state.fpr[frt] = value;
                     if update_status {
-                        self.update_fpscr_for_result(value, &[a, b, c], record);
+                        let operands: &[f64] = match xo5 {
+                            18 => &[a, b],
+                            22 | 26 => &[b],
+                            24 => &[1.0, b],
+                            25 => &[a, c],
+                            29..=31 => &[a, b, c],
+                            _ => &[a, b],
+                        };
+                        self.update_fpscr_for_result(value, operands, record);
                     } else if record {
                         self.copy_fpscr_to_cr1();
                     }
@@ -2016,8 +2025,8 @@ mod tests {
         let encode_mtfsf = |fm: u32, rb: u32| {
             (63 << 26) | (fm << 17) | (rb << 11) | (711 << 1)
         };
-        put_instruction(&mut memory, 0x1000, encode_mtfsb(31, 38)); // set FPSCR[0]
-        put_instruction(&mut memory, 0x1004, encode_mtfsb(30, 70)); // clear FPSCR[1]
+        put_instruction(&mut memory, 0x1000, encode_mtfsb(0, 38)); // set FPSCR[0]
+        put_instruction(&mut memory, 0x1004, encode_mtfsb(1, 70)); // clear FPSCR[1]
         put_instruction(&mut memory, 0x1008, encode_mtfsf(0x80, 2)); // replace FPSCR field 0
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
@@ -2052,7 +2061,7 @@ mod tests {
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
-        assert_eq!(cpu.state.cr[1], 0b1011);
+        assert_eq!(cpu.state.cr[1], 0b1100);
     }
 
     #[test]
