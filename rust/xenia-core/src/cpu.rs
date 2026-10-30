@@ -328,6 +328,48 @@ mod tests {
     }
 
     #[test]
+    fn bdnz_decrements_ctr_and_branches_until_zero() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // bdnz +8 (BO=16, BI ignored)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (16 << 26) | (16 << 21) | (2 << 2),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.ctr = 2;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.pc, 0x1008);
+        assert_eq!(cpu.state.ctr, 1);
+
+        cpu.state.pc = 0x1000;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.state.ctr, 0);
+    }
+
+    #[test]
+    fn bclr_branches_to_aligned_lr_and_sets_link_after_target_capture() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // bclrl with BO=20 (ignore CR and CTR), XO=16.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (19 << 26) | (20 << 21) | (16 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.lr = 0x1237;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.pc, 0x1234);
+        assert_eq!(cpu.state.lr, 0x1004);
+    }
+
+    #[test]
     fn stw_and_lwz_round_trip_big_endian_memory() {
         let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
         // stw r3, 16(r0)
