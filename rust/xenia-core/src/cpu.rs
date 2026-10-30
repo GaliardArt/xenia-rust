@@ -900,7 +900,11 @@ impl PpcInterpreter {
             // Stage lmw values before committing them so a failed memory read cannot
             // leave only part of the architectural register range modified.
             46 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
                 let address = base.wrapping_add(immediate as u32);
                 let mut loaded = [0_u64; 32];
                 for register in rt_rs..32 {
@@ -1614,7 +1618,11 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x100);
         // lmw r28,0(r3); stmw r30,16(r3)
         put_instruction(&mut memory, 0x1000, (46 << 26) | (28 << 21) | (3 << 16));
-        put_instruction(&mut memory, 0x1004, (47 << 26) | (30 << 21) | (3 << 16) | 16);
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (47 << 26) | (30 << 21) | (3 << 16) | 16,
+        );
         for register in 28..32 {
             memory
                 .write_u32_be(
@@ -1643,7 +1651,9 @@ mod tests {
     fn lmw_does_not_partially_update_registers_when_a_later_read_faults() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         put_instruction(&mut memory, 0x1000, (46 << 26) | (30 << 21) | (3 << 16));
-        memory.write_u32_be(GuestAddress(0x1004), 0x1111_1111).unwrap();
+        memory
+            .write_u32_be(GuestAddress(0x1004), 0x1111_1111)
+            .unwrap();
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1004;
