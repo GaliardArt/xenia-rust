@@ -58,9 +58,6 @@ impl fmt::Display for SecurityInfoError {
             Self::DescriptorTableOutsideHeader => {
                 f.write_str("XEX page-descriptor table exceeds declared header size")
             }
-            Self::DescriptorTableOutsideHeader => {
-                f.write_str("XEX page-descriptor table exceeds declared header size")
-            }
             Self::InvalidSectionType => {
                 f.write_str("XEX page descriptor has an unknown section type")
             }
