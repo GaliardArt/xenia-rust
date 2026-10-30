@@ -175,7 +175,13 @@ impl PpcInterpreter {
         const UX: u32 = 1 << 27;
         const ZX: u32 = 1 << 26;
         const XX: u32 = 1 << 25;
+        const FR: u32 = 1 << 18;
+        const FI: u32 = 1 << 17;
 
+        self.state.fpscr &= !(FR | FI);
+        if inexact {
+            self.state.fpscr |= FI;
+        }
         let mut raised = 0;
         if invalid {
             raised |= VX;
@@ -1263,7 +1269,7 @@ impl PpcInterpreter {
                     } // fcfid
                     _ => {
                         arithmetic = true;
-                        update_status = true;
+                        update_status = xo5 != 23;
                         match xo5 {
                             21 => a + b, // fadd
                             20 => a - b, // fsub
@@ -1287,6 +1293,10 @@ impl PpcInterpreter {
                         }
                     }
                 };
+
+                if xo5 == 23 && update_status == false {
+                    self.set_fprf_for_value(value);
+                }
 
                 if arithmetic && single {
                     // Single-precision arithmetic rounds the stored result,
@@ -1312,14 +1322,25 @@ impl PpcInterpreter {
                     if update_status {
                         let operands: &[f64] = match xo5 {
                             18 => &[a, b],
-                            22 | 26 => &[b],
-                            24 => &[1.0, b],
+                            22 => &[b],
+                            24 | 26 => &[1.0, b],
                             25 => &[a, c],
                             29..=31 => &[a, b, c],
                             _ => &[a, b],
                         };
                         let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
-                        self.update_fpscr_for_result(value, operands, inexact, record);
+                        if matches!(xo10, 14 | 15 | 814 | 815) {
+                            self.update_fpscr_exceptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                inexact,
+                                record,
+                            );
+                        } else {
+                            self.update_fpscr_for_result(value, operands, inexact, record);
+                        }
                     } else if record {
                         self.copy_fpscr_to_cr1();
                     }
