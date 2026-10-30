@@ -3,16 +3,16 @@
 
 pub mod address_space;
 pub mod cpu;
-pub mod memory;
 pub mod layout;
+pub mod memory;
 pub mod pe;
 pub mod security;
 pub mod xex;
 
 pub use address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
 pub use cpu::{PpcError, PpcInterpreter, PpcState};
-pub use memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
 pub use layout::{ImageLayout, LayoutError, LoadedSection, plan_image_layout};
+pub use memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
 pub use pe::{PeError, PeSection, XboxPeImage, parse_xbox_pe32};
 pub use security::{SecurityInfoError, XexPageDescriptor, XexSecurityInfo, parse_xex2_security_info};
 pub use xex::{XEX_HEADER_ENTRY_POINT, XexError, XexHeader, XexOptionalHeader, parse_xex2_header};
