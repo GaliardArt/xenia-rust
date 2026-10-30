@@ -69,7 +69,11 @@ struct FpExceptionFlags {
     overflow: bool,
     underflow: bool,
     inexact: bool,
+    raise_inexact: bool,
     fraction_rounded: bool,
+    /// Whether this instruction updates FPSCR[FR:FI]. Comparisons and
+    /// exception-only operations must preserve the previous rounding status.
+    update_rounding: bool,
     invalid_cause: u32,
 }
 
@@ -159,6 +163,14 @@ impl PpcInterpreter {
         const ZE: u32 = 1 << 4;
         const XE: u32 = 1 << 3;
 
+        const VX_CAUSES: u32 = 0x01FF_0000;
+
+        if self.state.fpscr & VX_CAUSES != 0 {
+            self.state.fpscr |= VX;
+        } else {
+            self.state.fpscr &= !VX;
+        }
+
         let enabled = (self.state.fpscr & VX != 0 && self.state.fpscr & VE != 0)
             || (self.state.fpscr & OX != 0 && self.state.fpscr & OE != 0)
             || (self.state.fpscr & UX != 0 && self.state.fpscr & UE != 0)
@@ -178,15 +190,17 @@ impl PpcInterpreter {
         const UX: u32 = 1 << 27;
         const ZX: u32 = 1 << 26;
         const XX: u32 = 1 << 25;
-        const FR: u32 = 1 << 18;
-        const FI: u32 = 1 << 17;
+        const FR: u32 = 1 << 15;
+        const FI: u32 = 1 << 14;
 
-        self.state.fpscr &= !(FR | FI);
-        if exceptions.fraction_rounded {
-            self.state.fpscr |= FR;
-        }
-        if exceptions.inexact {
-            self.state.fpscr |= FI;
+        if exceptions.update_rounding {
+            self.state.fpscr &= !(FR | FI);
+            if exceptions.fraction_rounded {
+                self.state.fpscr |= FR;
+            }
+            if exceptions.inexact {
+                self.state.fpscr |= FI;
+            }
         }
         let mut raised = 0;
         if exceptions.invalid {
@@ -201,12 +215,13 @@ impl PpcInterpreter {
         if exceptions.underflow {
             raised |= UX;
         }
-        if exceptions.inexact {
+        if exceptions.raise_inexact {
             raised |= XX;
         }
-        if raised != 0 {
-            self.state.fpscr |= FX | raised;
+        if raised & !self.state.fpscr != 0 {
+            self.state.fpscr |= FX;
         }
+        self.state.fpscr |= raised;
         self.refresh_fpscr_fex();
         if record {
             self.copy_fpscr_to_cr1();
@@ -214,9 +229,13 @@ impl PpcInterpreter {
     }
 
     fn set_fprf_for_value(&mut self, value: f64) {
-        const FPRF_MASK: u32 = 0x0001_F000;
+        const FPRF_MASK: u32 = 0x0000_3E00;
         let class = if value.is_nan() {
-            0x11
+            if Self::is_signaling_nan(value) {
+                0x00
+            } else {
+                0x11
+            }
         } else if value.is_infinite() {
             if value.is_sign_negative() { 0x09 } else { 0x05 }
         } else if value == 0.0 {
@@ -228,12 +247,15 @@ impl PpcInterpreter {
         } else {
             0x04
         };
-        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 12);
+        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 9);
     }
 
     fn set_fprf_condition(&mut self, condition: u8) {
-        const FPRF_MASK: u32 = 0x0001_F000;
-        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | (((condition as u32) & 0x1F) << 12);
+        // Compare instructions update the four-bit FPCC field, not the
+        // separate FPRF class bit C.
+        const FPCC_MASK: u32 = 0x0000_1E00;
+        self.state.fpscr =
+            (self.state.fpscr & !FPCC_MASK) | (((condition as u32) & 0x0F) << 9);
     }
 
     fn is_signaling_nan(value: f64) -> bool {
@@ -247,63 +269,94 @@ impl PpcInterpreter {
         &mut self,
         value: f64,
         operands: &[f64],
+        source_signaling_nan: bool,
         operation: u32,
         inexact: bool,
         fraction_rounded: bool,
+        overflow: bool,
         record: bool,
-    ) {
+    ) -> bool {
         let has_nan_operand = operands.iter().any(|operand| operand.is_nan());
-        let invalid = value.is_nan()
-            && (!has_nan_operand
-                || operands
-                    .iter()
-                    .any(|operand| Self::is_signaling_nan(*operand)));
-        let div_zero = operands.len() >= 2
+        let signaling_nan = source_signaling_nan
+            || operands
+                .iter()
+                .any(|operand| Self::is_signaling_nan(*operand));
+        let mut invalid_cause = if signaling_nan { 1 << 24 } else { 0 }; // VXSNAN
+
+        // Determine invalid-operation causes from the operands themselves.
+        // This matters for fused operations where a QNaN addend must not hide
+        // an independent invalid infinity-times-zero product.
+        match operation {
+            18 if operands.len() >= 2 && operands[0] == 0.0 && operands[1] == 0.0 => {
+                invalid_cause |= 1 << 21; // VXZDZ
+            }
+            18 if operands.len() >= 2
+                && operands[0].is_infinite()
+                && operands[1].is_infinite() =>
+            {
+                invalid_cause |= 1 << 22; // VXIDI
+            }
+            20 if operands.len() >= 2
+                && operands[0].is_infinite()
+                && operands[1].is_infinite()
+                && operands[0].is_sign_negative() == operands[1].is_sign_negative() =>
+            {
+                invalid_cause |= 1 << 23; // VXISI: infinity minus same-sign infinity
+            }
+            21 if operands.len() >= 2
+                && operands[0].is_infinite()
+                && operands[1].is_infinite()
+                && operands[0].is_sign_negative() != operands[1].is_sign_negative() =>
+            {
+                invalid_cause |= 1 << 23; // VXISI: opposite-sign infinities added
+            }
+            25 if operands.len() >= 2
+                && ((operands[0].is_infinite() && operands[1] == 0.0)
+                    || (operands[1].is_infinite() && operands[0] == 0.0)) =>
+            {
+                invalid_cause |= 1 << 20; // VXIMZ
+            }
+            28..=31 if operands.len() >= 3
+                && ((operands[0].is_infinite() && operands[2] == 0.0)
+                    || (operands[2].is_infinite() && operands[0] == 0.0)) =>
+            {
+                invalid_cause |= 1 << 20; // VXIMZ
+            }
+            28..=31 if operands.len() >= 3
+                && (operands[0].is_infinite() || operands[2].is_infinite())
+                && operands[1].is_infinite()
+                && ((operands[0].is_sign_negative() ^ operands[2].is_sign_negative())
+                    != (operands[1].is_sign_negative() ^ matches!(operation, 28 | 30))) =>
+            {
+                invalid_cause |= 1 << 23; // VXISI
+            }
+            22 | 26 if operands.last().is_some_and(|operand| *operand < 0.0) => {
+                invalid_cause |= 1 << 17; // VXSQRT
+            }
+            _ => {}
+        }
+
+        let invalid = signaling_nan
+            || invalid_cause != 0
+            || (value.is_nan() && !has_nan_operand);
+        // ZX is specific to division/reciprocal operations. A zero
+        // second operand in add, subtract, multiply, or fused operations is
+        // ordinary arithmetic and must not raise divide-by-zero.
+        let div_zero = matches!(operation, 18 | 24 | 26)
+            && operands.len() >= 2
             && operands[1] == 0.0
             && operands[0] != 0.0
             && operands[0].is_finite();
-        let overflow =
-            value.is_infinite() && !div_zero && operands.iter().all(|operand| operand.is_finite());
+        let overflow = !div_zero
+            && operands.iter().all(|operand| operand.is_finite())
+            && (overflow || value.is_infinite());
         let underflow = (value == 0.0 || value.is_subnormal()) && inexact;
-        let mut invalid_cause = 0;
-        if invalid {
-            if operands
-                .iter()
-                .any(|operand| Self::is_signaling_nan(*operand))
-            {
-                invalid_cause |= 1 << 24; // VXSNAN
-            } else {
-                match operation {
-                    18 if operands.len() >= 2 && operands[0] == 0.0 && operands[1] == 0.0 => {
-                        invalid_cause |= 1 << 21; // VXZDZ
-                    }
-                    18 if operands.len() >= 2
-                        && operands[0].is_infinite()
-                        && operands[1].is_infinite() =>
-                    {
-                        invalid_cause |= 1 << 22; // VXIDI
-                    }
-                    20 | 21
-                        if operands.len() >= 2
-                            && operands[0].is_infinite()
-                            && operands[1].is_infinite() =>
-                    {
-                        invalid_cause |= 1 << 23; // VXISI
-                    }
-                    25 if operands.len() >= 2
-                        && ((operands[0].is_infinite() && operands[1] == 0.0)
-                            || (operands[1].is_infinite() && operands[0] == 0.0)) =>
-                    {
-                        invalid_cause |= 1 << 20; // VXIMZ
-                    }
-                    22 | 26 if operands.last().is_some_and(|operand| *operand < 0.0) => {
-                        invalid_cause |= 1 << 9; // VXSQRT
-                    }
-                    _ => {}
-                }
-            }
+        let invalid_enabled = invalid && self.state.fpscr & (1 << 7) != 0;
+        let div_zero_enabled = div_zero && self.state.fpscr & (1 << 4) != 0;
+        if !invalid_enabled && !div_zero_enabled {
+            self.set_fprf_for_value(value);
         }
-        self.set_fprf_for_value(value);
+        let update_rounding = operation != 26 || invalid || div_zero;
         self.update_fpscr_exceptions(
             FpExceptionFlags {
                 invalid,
@@ -311,11 +364,14 @@ impl PpcInterpreter {
                 overflow,
                 underflow,
                 inexact: inexact || overflow,
+                raise_inexact: update_rounding && (inexact || overflow || underflow),
                 fraction_rounded,
+                update_rounding,
                 invalid_cause,
             },
             record,
         );
+        invalid_enabled || div_zero_enabled
     }
 
     fn next_up_f32(value: f32) -> f32 {
@@ -365,8 +421,220 @@ impl PpcInterpreter {
         adjusted as f64
     }
 
+    fn extend_single_preserving_nan(value: f32) -> f64 {
+        let bits = value.to_bits();
+        let exponent = bits & 0x7F80_0000;
+        let fraction = bits & 0x007F_FFFF;
+        if exponent == 0x7F80_0000 && fraction != 0 {
+            let sign = ((bits as u64) & 0x8000_0000) << 32;
+            f64::from_bits(sign | 0x7FF0_0000_0000_0000 | ((fraction as u64) << 29))
+        } else {
+            value as f64
+        }
+    }
+
+    fn narrow_single_preserving_nan(value: f64) -> f32 {
+        let bits = value.to_bits();
+        let exponent = bits & 0x7FF0_0000_0000_0000;
+        let fraction = bits & 0x000F_FFFF_FFFF_FFFF;
+        if exponent == 0x7FF0_0000_0000_0000 && fraction != 0 {
+            let sign = ((bits >> 32) as u32) & 0x8000_0000;
+            let mut payload = ((fraction >> 29) as u32) & 0x007F_FFFF;
+            if payload == 0 {
+                payload = 1;
+            }
+            f32::from_bits(sign | 0x7F80_0000 | payload)
+        } else {
+            value as f32
+        }
+    }
+
+    fn next_up_f64(value: f64) -> f64 {
+        if value.is_nan() || value == f64::INFINITY {
+            return value;
+        }
+        if value == 0.0 {
+            return f64::from_bits(1);
+        }
+        let bits = value.to_bits();
+        f64::from_bits(if value.is_sign_positive() {
+            bits + 1
+        } else {
+            bits - 1
+        })
+    }
+
+    fn next_down_f64(value: f64) -> f64 {
+        if value.is_nan() || value == f64::NEG_INFINITY {
+            return value;
+        }
+        if value == 0.0 {
+            return f64::from_bits(0x8000_0000_0000_0001);
+        }
+        let bits = value.to_bits();
+        f64::from_bits(if value.is_sign_positive() {
+            bits - 1
+        } else {
+            bits + 1
+        })
+    }
+
+    /// Error-free TwoSum residual for finite, non-overflowing additions.
+    fn two_sum_error(a: f64, b: f64, sum: f64) -> f64 {
+        let b_virtual = sum - a;
+        let a_virtual = sum - b_virtual;
+        let b_roundoff = b - b_virtual;
+        let a_roundoff = a - a_virtual;
+        a_roundoff + b_roundoff
+    }
+
+    /// Applies FPSCR-directed binary64 rounding and reports whether the
+    /// operation was inexact and whether the stored fraction rounded away
+    /// from zero. The residual is exact for add/sub/mul/div/sqrt in the
+    /// ordinary finite range; fused operations use a compensated residual.
+    fn round_binary64_result(
+        &self,
+        operation: u32,
+        a: f64,
+        b: f64,
+        c: f64,
+        result: f64,
+    ) -> (f64, bool, bool, bool) {
+        if result.is_nan() {
+            return (result, false, false, false);
+        }
+        if result.is_infinite() {
+            let operands_finite = match operation {
+                21 | 20 | 18 => a.is_finite() && b.is_finite(),
+                25 => a.is_finite() && c.is_finite(),
+                22 | 24 | 26 => b.is_finite(),
+                28..=31 => a.is_finite() && b.is_finite() && c.is_finite(),
+                _ => false,
+            };
+            let divide_by_zero = matches!(operation, 18 | 24 | 26)
+                && b == 0.0
+                && a != 0.0
+                && a.is_finite();
+            if !operands_finite || divide_by_zero {
+                return (result, false, false, false);
+            }
+            let negative = result.is_sign_negative();
+            let adjusted = match self.fpscr_rounding_mode() {
+                0 => result,
+                1 => {
+                    if negative { -f64::MAX } else { f64::MAX }
+                }
+                2 if negative => -f64::MAX,
+                3 if !negative => f64::MAX,
+                _ => result,
+            };
+            return (adjusted, true, adjusted.is_infinite(), true);
+        }
+
+        let underflowed_to_zero = result == 0.0
+            && match operation {
+                18 => a != 0.0 && b != 0.0 && a.is_finite() && b.is_finite(),
+                25 => a != 0.0 && c != 0.0 && a.is_finite() && c.is_finite(),
+                _ => false,
+            };
+        if underflowed_to_zero {
+            let negative = match operation {
+                18 => a.is_sign_negative() ^ b.is_sign_negative(),
+                25 => a.is_sign_negative() ^ c.is_sign_negative(),
+                _ => false,
+            };
+            let min_subnormal = f64::from_bits(1);
+            let adjusted = match self.fpscr_rounding_mode() {
+                2 if !negative => min_subnormal,
+                3 if negative => -min_subnormal,
+                _ => result,
+            };
+            return (adjusted, true, adjusted != 0.0, false);
+        }
+
+        let residual = match operation {
+            21 => Self::two_sum_error(a, b, result),
+            20 => Self::two_sum_error(a, -b, result),
+            18 if b != 0.0 && a.is_finite() && b.is_finite() => {
+                (-result).mul_add(b, a) / b
+            }
+            25 => a.mul_add(c, -result),
+            22 if b >= 0.0 => (-result).mul_add(result, b),
+            28..=31 => {
+                let subtract_b = matches!(operation, 28 | 30);
+                let negate = matches!(operation, 30 | 31);
+                let addend = if subtract_b { -b } else { b };
+                let product = a * c;
+                let product_error = a.mul_add(c, -product);
+                let sum = product + addend;
+                let sum_error = Self::two_sum_error(product, addend, sum);
+                let compensated = (sum - if negate { -result } else { result })
+                    + product_error
+                    + sum_error;
+                if negate { -compensated } else { compensated }
+            }
+            _ => 0.0,
+        };
+
+        if !residual.is_finite() {
+            return (result, false, false, false);
+        }
+        let inexact = residual != 0.0;
+        if !inexact {
+            return (result, false, false, false);
+        }
+
+        let adjusted = match self.fpscr_rounding_mode() {
+            0 => result,
+            1 if (result.is_sign_positive() && residual < 0.0)
+                || (result.is_sign_negative() && residual > 0.0) =>
+            {
+                if result.is_sign_positive() {
+                    Self::next_down_f64(result)
+                } else {
+                    Self::next_up_f64(result)
+                }
+            }
+            2 if residual > 0.0 => Self::next_up_f64(result),
+            3 if residual < 0.0 => Self::next_down_f64(result),
+            _ => result,
+        };
+        let rounded_minus_exact = (adjusted - result) - residual;
+        let fraction_rounded = if adjusted.is_sign_positive() {
+            adjusted > 0.0 && rounded_minus_exact > 0.0
+        } else {
+            adjusted < 0.0 && rounded_minus_exact < 0.0
+        };
+        (adjusted, true, fraction_rounded, false)
+    }
+
     fn fpscr_rounding_mode(&self) -> u32 {
         self.state.fpscr & 0b11
+    }
+
+    fn round_i64_to_f64(&self, integer: i64) -> (f64, bool, bool) {
+        let nearest = integer as f64;
+        let represented = nearest as i128;
+        let exact = integer as i128;
+        if represented == exact {
+            return (nearest, false, false);
+        }
+
+        let adjusted = match self.fpscr_rounding_mode() {
+            0 => nearest,
+            1 if integer > 0 && represented > exact => Self::next_down_f64(nearest),
+            1 if integer < 0 && represented < exact => Self::next_up_f64(nearest),
+            2 if represented < exact => Self::next_up_f64(nearest),
+            3 if represented > exact => Self::next_down_f64(nearest),
+            _ => nearest,
+        };
+        let adjusted_integer = adjusted as i128;
+        let fraction_rounded = if integer > 0 {
+            adjusted_integer > exact
+        } else {
+            integer < 0 && adjusted_integer < exact
+        };
+        (adjusted, true, fraction_rounded)
     }
 
     fn round_fp_to_integer(&self, value: f64) -> f64 {
@@ -380,8 +648,12 @@ impl PpcInterpreter {
 
     fn write_fpscr_field(&mut self, field: usize, value: u8) {
         let shift = 28 - (field * 4);
-        let mask = 0xF_u32 << shift;
-        self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) & 0xF) << shift);
+        let mut mask = 0xF_u32 << shift;
+        if field == 0 {
+            // FEX and VX are computed summaries, not writable field bits.
+            mask &= !((1 << 30) | (1 << 29));
+        }
+        self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) << shift) & mask);
         self.refresh_fpscr_fex();
     }
 
@@ -592,6 +864,41 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
+                    855 | 887 | 983 => {
+                        // Integer-word transfers use the low-order 32 bits of
+                        // the FPR. lfiwax sign-fills the upper word; lfiwzx
+                        // zero-fills it; stfiwx stores without conversion.
+                        let address = (if ra == 0 { 0 } else { left }).wrapping_add(right);
+                        match extended_opcode {
+                            855 => {
+                                let word = memory
+                                    .read_u32_be(GuestAddress(address))
+                                    .map_err(Into::into)?;
+                                let upper = if word & 0x8000_0000 != 0 {
+                                    0xFFFF_FFFF_0000_0000
+                                } else {
+                                    0
+                                };
+                                self.state.fpr[rt_rs] =
+                                    f64::from_bits(upper | word as u64);
+                            }
+                            887 => {
+                                let word = memory
+                                    .read_u32_be(GuestAddress(address))
+                                    .map_err(Into::into)?;
+                                self.state.fpr[rt_rs] = f64::from_bits(word as u64);
+                            }
+                            983 => {
+                                memory
+                                    .write_u32_be(
+                                        GuestAddress(address),
+                                        self.state.fpr[rt_rs].to_bits() as u32,
+                                    )
+                                    .map_err(Into::into)?;
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                     339 | 467 => {
                         // mfspr/mtspr encode the two five-bit SPR halves in
                         // reversed field order. Only architectural SPRs represented
@@ -794,11 +1101,11 @@ impl PpcInterpreter {
                         };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let value = if extended_opcode == 535 || extended_opcode == 567 {
-                            f32::from_bits(
+                            Self::extend_single_preserving_nan(f32::from_bits(
                                 memory
                                     .read_u32_be(GuestAddress(address))
                                     .map_err(Into::into)?,
-                            ) as f64
+                            ))
                         } else {
                             f64::from_bits(
                                 memory
@@ -826,7 +1133,8 @@ impl PpcInterpreter {
                             memory
                                 .write_u32_be(
                                     GuestAddress(address),
-                                    (self.state.fpr[rt_rs] as f32).to_bits(),
+                                    Self::narrow_single_preserving_nan(self.state.fpr[rt_rs])
+                                        .to_bits(),
                                 )
                                 .map_err(Into::into)?;
                         } else {
@@ -1121,11 +1429,11 @@ impl PpcInterpreter {
                 })
                 .wrapping_add(immediate as u32);
                 let value = match opcode {
-                    48 | 49 => f32::from_bits(
+                    48 | 49 => Self::extend_single_preserving_nan(f32::from_bits(
                         memory
                             .read_u32_be(GuestAddress(address))
                             .map_err(Into::into)?,
-                    ) as f64,
+                    )),
                     50 | 51 => f64::from_bits(
                         memory
                             .read_u64_be(GuestAddress(address))
@@ -1155,7 +1463,8 @@ impl PpcInterpreter {
                     memory
                         .write_u32_be(
                             GuestAddress(address),
-                            (self.state.fpr[rt_rs] as f32).to_bits(),
+                            Self::narrow_single_preserving_nan(self.state.fpr[rt_rs])
+                                .to_bits(),
                         )
                         .map_err(Into::into)?;
                 } else {
@@ -1212,10 +1521,23 @@ impl PpcInterpreter {
                 let xo10 = (instruction >> 1) & 0x3FF;
                 let xo5 = xo10 & 0x1F;
                 let single = opcode == 59;
+                if (single && xo10 == 26) || (!single && xo10 == 24) {
+                    return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                }
                 let record = instruction & 1 != 0;
-                let a = self.state.fpr[fra];
-                let b = self.state.fpr[frb];
-                let c = self.state.fpr[frc];
+                let source_a = self.state.fpr[fra];
+                let source_b = self.state.fpr[frb];
+                let source_c = self.state.fpr[frc];
+                let mut a = source_a;
+                let mut b = source_b;
+                let mut c = source_c;
+                if single && xo10 != 24 {
+                    // Single-precision arithmetic consumes binary32 source
+                    // operands. FRES is the exception: its source is binary64.
+                    a = (a as f32) as f64;
+                    b = (b as f32) as f64;
+                    c = (c as f32) as f64;
+                }
 
                 // FPSCR field moves and bit operations use PowerPC's MSB-first
                 // bit numbering. They do not execute an arithmetic operation.
@@ -1227,7 +1549,14 @@ impl PpcInterpreter {
                         let shift = 28 - crfs * 4;
                         let field = ((self.state.fpscr >> shift) & 0xF) as u8;
                         self.state.cr[crfd] = field;
-                        self.state.fpscr &= !(0xF << shift);
+                        let clear_mask = match crfs {
+                            0 => (1 << 31) | (1 << 28), // FX and OX; FEX/VX are summaries.
+                            1 => 0x0F00_0000,          // UX, ZX, XX, VXSNAN.
+                            2 => 0x00F0_0000,          // VXISI, VXIDI, VXZDZ, VXIMZ.
+                            3 => 0x000F_0000,          // VXVC, VXSOFT, VXSQRT, VXCVI.
+                            _ => 0,                   // Non-exception status/control fields.
+                        };
+                        self.state.fpscr &= !clear_mask;
                         self.refresh_fpscr_fex();
                         self.state.pc = next_pc;
                         return Ok(());
@@ -1235,11 +1564,15 @@ impl PpcInterpreter {
                     38 | 70 => {
                         // mtfsb1 / mtfsb0
                         let bit = (instruction >> 21) & 0x1F;
-                        let mask = 1_u32 << (31 - bit);
-                        if xo10 == 38 {
-                            self.state.fpscr |= mask;
-                        } else {
-                            self.state.fpscr &= !mask;
+                        // FEX and VX are derived summaries and cannot be
+                        // explicitly changed by mtfsb0/mtfsb1.
+                        if bit != 1 && bit != 2 {
+                            let mask = 1_u32 << (31 - bit);
+                            if xo10 == 38 {
+                                self.state.fpscr |= mask;
+                            } else {
+                                self.state.fpscr &= !mask;
+                            }
                         }
                         self.refresh_fpscr_fex();
                         if record {
@@ -1262,9 +1595,11 @@ impl PpcInterpreter {
                     711 => {
                         // mtfsf FM,FRB (and the Xenia-supported L form)
                         let field_mask = ((instruction >> 17) & 0xFF) as u8;
-                        let value = self.state.fpr[frb] as u32;
+                        let value = self.state.fpr[frb].to_bits() as u32;
                         if instruction & (1 << 16) != 0 {
-                            self.state.fpscr = value;
+                            let summary_mask = (1 << 30) | (1 << 29);
+                            self.state.fpscr =
+                                (value & !summary_mask) | (self.state.fpscr & summary_mask);
                         } else {
                             let mut mask = 0_u32;
                             for field in 0..8 {
@@ -1272,6 +1607,7 @@ impl PpcInterpreter {
                                     mask |= 0xF << (28 - field * 4);
                                 }
                             }
+                            mask &= !((1 << 30) | (1 << 29));
                             self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
                         self.refresh_fpscr_fex();
@@ -1286,7 +1622,7 @@ impl PpcInterpreter {
 
                 if xo10 == 583 {
                     // mffs
-                    self.state.fpr[frt] = self.state.fpscr as f64;
+                    self.state.fpr[frt] = f64::from_bits(0xFFF8_0000_0000_0000 | self.state.fpscr as u64);
                     if record {
                         self.copy_fpscr_to_cr1();
                     }
@@ -1308,7 +1644,6 @@ impl PpcInterpreter {
                         (0b0010, 0b0_0010)
                     };
                     self.state.cr[field] = cr_condition;
-                    self.set_fprf_condition(fprf_condition);
                     let signaling_nan = [a, b].iter().any(|value| {
                         let bits = value.to_bits();
                         (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
@@ -1316,10 +1651,16 @@ impl PpcInterpreter {
                             && (bits & 0x0008_0000_0000_0000) == 0
                     });
                     let invalid = unordered && (xo10 == 32 || signaling_nan);
+                    // Compare instructions update FPCC only; the FPRF
+                    // class bit C is preserved for all comparison results.
+                    self.set_fprf_condition(fprf_condition);
                     if signaling_nan {
                         self.state.fpscr |= 1 << 24; // VXSNAN
                     }
-                    if unordered && xo10 == 32 {
+                    if unordered
+                        && xo10 == 32
+                        && (!signaling_nan || self.state.fpscr & (1 << 7) == 0)
+                    {
                         self.state.fpscr |= 1 << 19; // VXVC
                     }
                     self.update_fpscr_exceptions(
@@ -1334,10 +1675,28 @@ impl PpcInterpreter {
                     return Ok(());
                 }
 
+                let source_signaling_nan = match xo10 {
+                    846 => false, // fcfid interprets the source register as an integer bit pattern.
+                    12 | 14 | 15 | 814 | 815 => Self::is_signaling_nan(source_b),
+                    _ => match xo5 {
+                        18 => Self::is_signaling_nan(source_a) || Self::is_signaling_nan(source_b),
+                        22 | 26 | 24 => Self::is_signaling_nan(source_b),
+                        25 => Self::is_signaling_nan(source_a) || Self::is_signaling_nan(source_c),
+                        29..=31 => {
+                            Self::is_signaling_nan(source_a)
+                                || Self::is_signaling_nan(source_b)
+                                || Self::is_signaling_nan(source_c)
+                        }
+                        _ => Self::is_signaling_nan(source_a) || Self::is_signaling_nan(source_b),
+                    },
+                };
+
                 let mut arithmetic = false;
                 let mut update_status = false;
                 let mut conversion_invalid = false;
-                let value = match xo10 {
+                let mut conversion_inexact = false;
+                let mut conversion_fraction_rounded = false;
+                let mut value = match xo10 {
                     264 => b.abs(),  // fabs
                     72 => b,         // fmr
                     136 => -b.abs(), // fnabs
@@ -1361,29 +1720,46 @@ impl PpcInterpreter {
                         update_status = true;
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
                             conversion_invalid = true;
-                            self.state.fpscr |= 1 << 8; // VXCVI
-                            self.update_fpscr_exceptions(
-                                FpExceptionFlags {
-                                    invalid: true,
-                                    invalid_cause: 1 << 8,
-                                    ..FpExceptionFlags::default()
-                                },
-                                record,
-                            );
+                            self.state.fpscr |= 1 << 16; // VXCVI
+                            let negative_or_nan = rounded.is_nan() || rounded < min;
                             if xo10 == 14 || xo10 == 15 {
-                                i32::MIN as f64
+                                let integer = if negative_or_nan {
+                                    i32::MIN
+                                } else {
+                                    i32::MAX
+                                };
+                                f64::from_bits(
+                                    (self.state.fpr[frt].to_bits() & 0xFFFF_FFFF_0000_0000)
+                                        | (integer as u32 as u64),
+                                )
                             } else {
-                                i64::MIN as f64
+                                let integer = if negative_or_nan {
+                                    i64::MIN
+                                } else {
+                                    i64::MAX
+                                };
+                                f64::from_bits(integer as u64)
                             }
-                        } else if xo10 == 14 || xo10 == 15 {
-                            (rounded as i32) as f64
                         } else {
-                            (rounded as i64) as f64
+                            conversion_inexact = rounded != b;
+                            conversion_fraction_rounded =
+                                conversion_inexact && rounded.abs() > b.abs();
+                            if xo10 == 14 || xo10 == 15 {
+                                f64::from_bits(
+                                    (self.state.fpr[frt].to_bits() & 0xFFFF_FFFF_0000_0000)
+                                        | (rounded as i32 as u32 as u64),
+                                )
+                            } else {
+                                f64::from_bits((rounded as i64) as u64)
+                            }
                         }
                     }
                     846 => {
                         update_status = true;
-                        (b as i64) as f64
+                        let converted = self.round_i64_to_f64(b.to_bits() as i64);
+                        conversion_inexact = converted.1;
+                        conversion_fraction_rounded = converted.2;
+                        converted.0
                     } // fcfid
                     _ => {
                         arithmetic = true;
@@ -1401,7 +1777,7 @@ impl PpcInterpreter {
                                 }
                             } // fsel
                             22 => b.sqrt(), // fsqrt
-                            24 => (1.0_f32 / (b as f32)) as f64, // fres (single estimate domain)
+                            24 => 1.0 / b, // fres: binary64 source, binary32 estimate result
                             26 => 1.0 / b.sqrt(), // frsqrte
                             29 => a.mul_add(c, b), // fmadd
                             28 => a.mul_add(c, -b), // fmsub
@@ -1412,7 +1788,23 @@ impl PpcInterpreter {
                     }
                 };
 
+                let mut double_inexact = false;
+                let mut double_fraction_rounded = false;
+                let mut double_overflow = false;
+                if arithmetic && !single && update_status && !matches!(xo5, 23 | 24 | 26) {
+                    let rounded = self.round_binary64_result(xo5, a, b, c, value);
+                    value = rounded.0;
+                    double_inexact = rounded.1;
+                    double_fraction_rounded = rounded.2;
+                    double_overflow = rounded.3;
+                }
+
                 if xo5 == 23 && !update_status {
+                    // fsel updates FPRF regardless of the record bit.
+                    self.set_fprf_for_value(value);
+                } else if !arithmetic && !update_status && record {
+                    // Unary move/sign instructions update FPRF only in their
+                    // record form; they never raise arithmetic exceptions.
                     self.set_fprf_for_value(value);
                 }
 
@@ -1420,6 +1812,7 @@ impl PpcInterpreter {
                     // Single-precision arithmetic rounds the stored result,
                     // not the source operands, to IEEE-754 binary32.
                     let rounded = self.round_to_single(value);
+                    let previous_fpr = self.state.fpr[frt];
                     self.state.fpr[frt] = rounded;
                     if update_status {
                         let operands: &[f64] = match xo10 {
@@ -1433,18 +1826,40 @@ impl PpcInterpreter {
                                 _ => &[a, b],
                             },
                         };
-                        self.update_fpscr_for_result(
+                        let divide_by_zero = matches!(xo5, 18 | 24 | 26)
+                            && operands.len() >= 2
+                            && operands[1] == 0.0
+                            && operands[0] != 0.0
+                            && operands[0].is_finite();
+                        let overflow = !divide_by_zero
+                            && operands.iter().all(|operand| operand.is_finite())
+                            && (value.is_infinite()
+                                || (value.is_finite() && value.abs() > f32::MAX as f64));
+                        let fraction_rounded = (value.is_finite()
+                            && rounded.abs() > value.abs())
+                            || (value.is_infinite()
+                                && rounded.is_infinite()
+                                && !divide_by_zero
+                                && operands.iter().all(|operand| operand.is_finite()));
+                        let invalid_enabled = self.update_fpscr_for_result(
                             rounded,
                             operands,
+                            source_signaling_nan,
                             xo5,
-                            rounded != value,
-                            rounded.abs() > value.abs(),
+                            value.is_finite() && rounded.is_finite() && rounded != value
+                                || overflow,
+                            fraction_rounded,
+                            overflow,
                             record,
                         );
+                        if invalid_enabled {
+                            self.state.fpr[frt] = previous_fpr;
+                        }
                     } else if record {
                         self.copy_fpscr_to_cr1();
                     }
                 } else {
+                    let previous_fpr = self.state.fpr[frt];
                     self.state.fpr[frt] = value;
                     if update_status {
                         let operands: &[f64] = match xo10 {
@@ -1458,28 +1873,56 @@ impl PpcInterpreter {
                                 _ => &[a, b],
                             },
                         };
-                        let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815)
-                            && !conversion_invalid
-                            && value.is_finite()
-                            && b.is_finite()
-                            && value != b;
+                        let inexact = if arithmetic {
+                            double_inexact
+                        } else if matches!(xo10, 14 | 15 | 814 | 815 | 846) {
+                            conversion_inexact
+                        } else {
+                            xo10 == 12
+                                && b.is_finite()
+                                && (value.is_infinite() || value != b)
+                        };
                         if matches!(xo10, 14 | 15 | 814 | 815) {
                             self.update_fpscr_exceptions(
                                 FpExceptionFlags {
+                                    invalid: conversion_invalid,
                                     inexact,
+                                    raise_inexact: inexact,
+                                    fraction_rounded: conversion_fraction_rounded,
+                                    update_rounding: true,
+                                    invalid_cause: (if conversion_invalid { 1 << 16 } else { 0 })
+                                        | (if source_signaling_nan { 1 << 24 } else { 0 }),
                                     ..FpExceptionFlags::default()
                                 },
                                 record,
                             );
+                            if conversion_invalid && self.state.fpscr & (1 << 7) != 0 {
+                                self.state.fpr[frt] = previous_fpr;
+                            }
                         } else {
-                            self.update_fpscr_for_result(
+                            let invalid_enabled = self.update_fpscr_for_result(
                                 value,
                                 operands,
+                                source_signaling_nan,
                                 xo5,
                                 inexact,
-                                inexact && value.abs() > b.abs(),
+                                if arithmetic {
+                                    double_fraction_rounded
+                                } else if xo10 == 846 {
+                                    conversion_fraction_rounded
+                                } else {
+                                    inexact && b.is_finite() && value.abs() > b.abs()
+                                },
+                                double_overflow
+                                    || value.is_infinite()
+                                    || (xo10 == 12
+                                        && b.is_finite()
+                                        && b.abs() > f32::MAX as f64),
                                 record,
                             );
+                            if invalid_enabled {
+                                self.state.fpr[frt] = previous_fpr;
+                            }
                         }
                     } else if record {
                         self.copy_fpscr_to_cr1();
@@ -2229,7 +2672,150 @@ mod tests {
         assert_eq!(cpu.state.fpr[4], (3.75_f32) as f64);
         assert_eq!(cpu.state.fpr[5], 5.625);
         assert_eq!(cpu.state.cr[2], 0b0100);
-        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF: greater
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF: greater
+    }
+
+    #[test]
+    fn single_precision_load_and_store_preserve_signaling_nan_payloads() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // lfs f1,4(r3); stfs f1,12(r3)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (48 << 26) | (1 << 21) | (3 << 16) | 4,
+        );
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (52 << 26) | (1 << 21) | (3 << 16) | 12,
+        );
+        memory
+            .write_u32_be(GuestAddress(0x1004), 0x7F80_0001)
+            .unwrap();
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1000;
+
+        cpu.step(&mut memory).unwrap();
+        assert!(PpcInterpreter::is_signaling_nan(cpu.state.fpr[1]));
+        cpu.state.pc = 0x1008;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x100C)).unwrap(),
+            0x7F80_0001
+        );
+    }
+
+    #[test]
+    fn single_precision_arithmetic_rounds_operands_before_execution() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
+        cpu.state.fpr[3] = 2.0_f64.powi(-24);
+
+        cpu.step(&mut memory).unwrap();
+
+        // FRA rounds to 1.0f before adding FRB; the exact single-precision
+        // result is therefore the halfway value, which rounds to 1.0f.
+        assert_eq!(cpu.state.fpr[1].to_bits(), 1.0_f64.to_bits());
+    }
+
+    #[test]
+    fn single_precision_nan_result_does_not_raise_inexact() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::NAN;
+        cpu.state.fpr[3] = 1.0;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert!(cpu.state.fpr[1].is_nan());
+        assert_eq!(cpu.state.fpscr & ((1 << 14) | (1 << 25)), 0);
+
+        // A signaling NaN can be quieted by the binary32 operand conversion,
+        // but VXSNAN must still be raised from the original FPR bit pattern.
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0;
+        cpu.state.fpr[2] = f64::from_bits(0x7FF0_0000_0000_0001);
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_eq!(cpu.state.fpscr & ((1 << 14) | (1 << 25)), 0);
+    }
+
+    #[test]
+    fn double_precision_arithmetic_updates_inexact_and_obeys_rounding_mode() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadd f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 2.0_f64.powi(-53);
+
+        // Nearest-even retains 1.0, but the discarded addend is inexact.
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 1.0);
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded down
+
+        // Toward +infinity must advance to the next representable binary64.
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 1.0_f64.to_bits() + 1);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded up
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+    }
+
+    #[test]
+    fn floating_point_move_record_form_updates_fprf_without_exceptions() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fabs. f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (264 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -2.5;
+        cpu.state.fpscr = 0xA000_0000;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 2.5);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+        assert_eq!(cpu.state.fpscr & 0xE600_0000, 0xA000_0000); // exception state unchanged
+        assert_eq!(cpu.state.cr[1], 0x0A); // CR1 summary copied from FPSCR
+
+        // Signaling NaNs remain signaling through a sign-only move, so their
+        // FPRF class is the architectural signaling-NaN class (0x00).
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits(0x7FF0_0000_0000_0001);
+        cpu.state.fpscr = 0x0000_0800;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0);
+        assert_eq!(cpu.state.fpscr & 0xE600_0000, 0);
     }
 
     #[test]
@@ -2250,7 +2836,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
-        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
         assert_eq!(cpu.state.fpscr & 0xE000_0000, 0); // no FX/FEX/VX
 
         // The single-precision fsel. form also copies FPSCR[0:3] to CR1.
@@ -2288,6 +2874,59 @@ mod tests {
     }
 
     #[test]
+    fn mffs_and_mtfsf_transfer_the_raw_fpscr_word() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // mffs f1; mtfsf 0xFF,f1
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (583 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (0xFF << 17) | (1 << 11) | (711 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0xA123_4567;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 0xFFF8_0000_A123_4567);
+        cpu.state.fpscr = 0;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpscr, 0xA123_4567);
+    }
+
+    #[test]
+    fn fcfid_converts_raw_signed_integer_with_fpscr_rounding() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fcfid f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (846 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits(9_007_199_254_740_993);
+
+        cpu.state.fpscr = 0;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 9_007_199_254_740_992.0);
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // rounded toward zero
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10; // toward +infinity
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 9_007_199_254_740_994.0);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+    }
+
+    #[test]
     fn fpscr_field_instructions_read_write_and_clear_fields() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_mtfsfi = |bf: u32, imm: u32| (63 << 26) | (bf << 23) | (imm << 12) | (134 << 1);
@@ -2307,7 +2946,49 @@ mod tests {
         assert_eq!(cpu.state.cr[3], 0xA);
         assert_eq!(cpu.state.cr[4], 0x5);
         assert_eq!(cpu.state.fpscr & 0xF000_0000, 0);
-        assert_eq!(cpu.state.fpscr & 0xF, 0);
+        assert_eq!(cpu.state.fpscr & 0xF, 0x5);
+    }
+
+    #[test]
+    fn mcrfs_clears_only_exception_bits_and_recomputes_summaries() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
+        let encode_mcrfs =
+            |crfd: u32, crfs: u32| (63 << 26) | (crfd << 23) | (crfs << 18) | (64 << 1);
+        let encode_mtfsb =
+            |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
+        put_instruction(&mut memory, 0x1000, encode_mcrfs(0, 0));
+        put_instruction(&mut memory, 0x1004, encode_mtfsb(1, 70)); // cannot clear FEX
+        put_instruction(&mut memory, 0x1008, encode_mtfsb(2, 70)); // cannot clear VX
+        put_instruction(&mut memory, 0x100C, encode_mcrfs(1, 1));
+        put_instruction(&mut memory, 0x1010, encode_mtfsb(1, 38)); // cannot set FEX
+        put_instruction(&mut memory, 0x1014, encode_mtfsb(2, 38)); // cannot set VX
+        put_instruction(&mut memory, 0x1018, encode_mcrfs(2, 4));
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = (1 << 31)
+            | (1 << 30)
+            | (1 << 29)
+            | (1 << 28)
+            | (1 << 27)
+            | (1 << 26)
+            | (1 << 25)
+            | (1 << 24)
+            | (1 << 15)
+            | (1 << 14)
+            | 0x0000_0800
+            | (1 << 7); // VE enables FEX while VXSNAN is pending.
+
+        for _ in 0..7 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.cr[0], 0x0F); // original FX/FEX/VX/OX
+        assert_eq!(cpu.state.cr[1], 0x0F); // original UX/ZX/XX/VXSNAN
+        assert_eq!(cpu.state.cr[2], 0x0C); // FR/FI are copied, not cleared
+        assert_eq!(cpu.state.fpscr & ((1 << 30) | (1 << 29)), 0); // summaries recomputed
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), (1 << 15) | (1 << 14));
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF preserved
     }
 
     #[test]
@@ -2321,13 +3002,41 @@ mod tests {
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0x4000_0000;
-        cpu.state.fpr[2] = 0x5_u32 as f64;
+        cpu.state.fpr[2] = f64::from_bits(0x5);
 
         for _ in 0..3 {
             cpu.step(&mut memory).unwrap();
         }
 
         assert_eq!(cpu.state.fpscr & 0xF000_000F, 0x8000_0005);
+    }
+
+    #[test]
+    fn floating_point_add_with_zero_does_not_raise_divide_by_zero() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fadd f1,f2,f3; fdiv f4,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (4 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 0.0;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 1.0);
+        assert_eq!(cpu.state.fpscr & (1 << 26), 0); // no ZX for addition
+
+        cpu.step(&mut memory).unwrap();
+        assert!(cpu.state.fpr[4].is_infinite());
+        assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX for division
     }
 
     #[test]
@@ -2372,11 +3081,18 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::NAN;
         cpu.state.fpr[2] = 1.0;
+        // Comparisons update FPRF and invalid causes, but preserve the
+        // rounding status left by the preceding arithmetic instruction.
+        cpu.state.fpscr = (1 << 15) | (1 << 14);
 
         cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.fpscr & ((1 << 15) | (1 << 14)),
+            (1 << 15) | (1 << 14)
+        );
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
-        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_1000); // quiet NaN
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2200); // quiet NaN
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[3], 0b0001);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0);
@@ -2418,7 +3134,7 @@ mod tests {
             cpu.state.fpr[1].to_bits(),
             (f32::from_bits(0xBF80_0001) as f64).to_bits()
         );
-        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: rounded away from zero.
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded away from zero.
 
         // A finite binary64 value that overflows binary32 must still obey
         // directed rounding instead of unconditionally becoming infinity.
@@ -2427,17 +3143,426 @@ mod tests {
         cpu.state.fpscr = 0b01; // toward zero
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f32::MAX as f64);
+        assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX despite finite directed result
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::INFINITY);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: overflow rounded away from zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -f64::MAX;
         cpu.state.fpscr = 0b10; // toward +infinity, negative magnitude decreases
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], -(f32::MAX as f64));
+    }
+
+    #[test]
+    fn enabled_zero_divide_preserves_destination_and_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv. f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 99.0;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800; // ZE, FR, FI, FPRF
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 99.0);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF unchanged
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+        assert_ne!(cpu.state.cr[1], 0); // CR1 summary
+    }
+
+    #[test]
+    fn reciprocal_estimates_honor_zero_divide_enable() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fres f1,f2; frsqrte f3,f4
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 11) | (24 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (3 << 21) | (4 << 11) | (26 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 10.0;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 20.0;
+        cpu.state.fpr[4] = -0.0;
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800; // ZE + status
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 10.0);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
+
+        cpu.state.pc = 0x1004;
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[3], 20.0);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
+    }
+
+    #[test]
+    fn frsqrte_preserves_rounding_flags_for_nonexceptional_results() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // frsqrte f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (26 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 4.0;
+        cpu.state.fpscr = (1 << 15) | (1 << 14);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 0.5);
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), (1 << 15) | (1 << 14));
+        assert_eq!(cpu.state.fpscr & (1 << 26), 0); // no ZX
+    }
+
+    #[test]
+    fn reciprocal_estimate_instructions_are_restricted_to_architectural_opcodes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fres is opcode 59; frsqrte is opcode 63.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 11) | (26 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (1 << 21) | (2 << 11) | (24 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(PpcError::UnsupportedInstruction { .. })
+        ));
+        cpu.state.pc = 0x1004;
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(PpcError::UnsupportedInstruction { .. })
+        ));
+    }
+
+    #[test]
+    fn fres_uses_binary64_source_and_rounds_estimate_to_single() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fres f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 11) | (24 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
+
+        cpu.step(&mut memory).unwrap();
+
+        let expected = (1.0 / cpu.state.fpr[2]) as f32 as f64;
+        assert_eq!(cpu.state.fpr[1], expected);
+        assert_ne!(cpu.state.fpr[1], 1.0);
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX is sticky FI
+    }
+
+    #[test]
+    fn double_precision_underflow_updates_fpscr_and_obeys_directed_rounding() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits(1);
+        cpu.state.fpr[3] = 2.0;
+
+        cpu.state.fpscr = 0; // nearest-even: half a minimum subnormal becomes zero
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 0);
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10; // toward +infinity
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 1);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+    }
+
+    #[test]
+    fn double_precision_overflow_obeys_fpscr_rounding_modes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fmul f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 6) | (25 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::MAX;
+        cpu.state.fpr[3] = 2.0;
+
+        cpu.state.fpscr = 0b01; // toward zero
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], f64::MAX);
+        assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // not rounded away from zero
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10; // toward +infinity
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], f64::INFINITY);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -f64::MAX;
+        cpu.state.fpscr = 0b10; // toward +infinity: negative magnitude decreases
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], -f64::MAX);
+        assert_eq!(cpu.state.fpscr & (1 << 15), 0);
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b11; // toward -infinity
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], f64::NEG_INFINITY);
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0);
+    }
+
+    #[test]
+    fn ordered_compare_snan_cause_depends_on_invalid_enable() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fcmpo cr2,f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (2 << 23) | (1 << 16) | (2 << 11) | (32 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = f64::from_bits(0x7FF0_0000_0000_0001);
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpscr = 1 << 7; // VE enabled
+
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
+        assert_eq!(cpu.state.fpscr & (1 << 19), 0); // VXVC suppressed for enabled SNaN
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0; // VE disabled
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
+        assert_ne!(cpu.state.fpscr & (1 << 19), 0); // VXVC also raised
+    }
+
+    #[test]
+    fn enabled_invalid_exception_preserves_previous_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fdiv f1,f2,f3; fcmpo cr2,f4,f5
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (2 << 23) | (4 << 16) | (5 << 11) | (32 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpr[4] = f64::NAN;
+        cpu.state.fpr[5] = 1.0;
+        cpu.state.fpscr = (1 << 7) | 0x0000_0800; // VE enabled; prior FPRF=positive
+        let prior_fprf = cpu.state.fpscr & 0x0000_3E00;
+
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, prior_fprf);
+
+        cpu.state.pc = 0x1004;
+        cpu.state.fpscr = (1 << 7) | prior_fprf;
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VXVC
+        assert_eq!(cpu.state.fpscr & (1 << 13), prior_fprf & (1 << 13)); // C preserved
+        assert_eq!(cpu.state.fpscr & 0x0000_1E00, 1 << 9); // FPCC = unordered
+    }
+
+    #[test]
+    fn enabled_invalid_arithmetic_preserves_destination_and_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv. f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 42.0;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = (1 << 7) | 0x0000_0800; // VE; prior positive-normal FPRF
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 42.0); // enabled invalid operation suppresses FPR write
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF unchanged
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+        assert_ne!(cpu.state.cr[1] & 0x0F, 0); // CR1 summary
+    }
+
+    #[test]
+    fn enabled_invalid_integer_conversion_preserves_destination() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fctiw f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 99.0;
+        cpu.state.fpr[2] = f64::NAN;
+        cpu.state.fpscr = 1 << 7; // VE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 99.0);
+        assert_ne!(cpu.state.fpscr & (1 << 16), 0); // VXCVI
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+    }
+
+    #[test]
+    fn fx_is_set_only_when_an_exception_status_bit_transitions() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // fdiv f1,f2,f3; mtfsb0 FPSCR[FX]; fdiv f1,f2,f3
+        let fdiv = (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1);
+        let clear_fx = (63 << 26) | (0 << 21) | (70 << 1);
+        put_instruction(&mut memory, 0x1000, fdiv);
+        put_instruction(&mut memory, 0x1004, clear_fx);
+        put_instruction(&mut memory, 0x1008, fdiv);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+
+        cpu.step(&mut memory).unwrap();
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // first VXZDZ transition sets FX
+        assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // explicitly cleared
+        assert_ne!(cpu.state.fpscr & (1 << 21), 0); // cause remains sticky
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // no new exception-bit transition
+        assert_ne!(cpu.state.fpscr & (1 << 21), 0);
+    }
+
+    #[test]
+    fn fused_multiply_add_sets_infinity_zero_and_infinity_infinity_causes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // fmadd f1,f2,f3,f4; fmadd f5,f2,f3,f6; fmadd f9,f2,f3,f7
+        let fmadd = |frt: u32, fra: u32, frb: u32, frc: u32| {
+            (63 << 26)
+                | (frt << 21)
+                | (fra << 16)
+                | (frb << 11)
+                | (frc << 6)
+                | (29 << 1)
+        };
+        put_instruction(&mut memory, 0x1000, fmadd(1, 2, 4, 3));
+        put_instruction(&mut memory, 0x1004, fmadd(5, 2, 6, 3));
+        put_instruction(&mut memory, 0x1008, fmadd(9, 2, 7, 3));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::INFINITY;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpr[4] = 1.0;
+        cpu.state.fpr[6] = f64::NEG_INFINITY;
+
+        cpu.step(&mut memory).unwrap();
+        assert!(cpu.state.fpr[1].is_nan());
+        assert_ne!(cpu.state.fpscr & (1 << 20), 0); // VXIMZ
+
+        cpu.state.pc = 0x1004;
+        cpu.state.fpr[3] = 1.0;
+        cpu.step(&mut memory).unwrap();
+        assert!(cpu.state.fpr[5].is_nan());
+        assert_ne!(cpu.state.fpscr & (1 << 23), 0); // VXISI
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+
+        // A QNaN addend must not hide the independent infinity-times-zero
+        // invalid product in the fused operation.
+        cpu.state.pc = 0x1008;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpr[7] = f64::NAN;
+        cpu.state.fpscr = 0;
+        cpu.step(&mut memory).unwrap();
+        assert!(cpu.state.fpr[9].is_nan());
+        assert_ne!(cpu.state.fpscr & (1 << 20), 0); // VXIMZ
+    }
+
+    #[test]
+    fn negative_square_root_sets_the_vxsqrt_cause_bit() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fsqrt f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (22 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -1.0;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert!(cpu.state.fpr[1].is_nan());
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
     }
 
     #[test]
@@ -2472,9 +3597,45 @@ mod tests {
         }
 
         assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
-        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // VXSQRT
         assert_ne!(cpu.state.fpscr & (1 << 20), 0); // VXIMZ
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+    }
+
+    #[test]
+    fn fctiw_stfiwx_and_integer_word_fpr_loads_preserve_register_bits() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
+        // fctiw f1,f2; stfiwx f1,r3,r4; lfiwax f5,r3,r4; lfiwzx f6,r3,r4
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
+        );
+        let encode_x = |frt: u32, xo: u32| {
+            (31 << 26) | (frt << 21) | (3 << 16) | (4 << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1004, encode_x(1, 983));
+        put_instruction(&mut memory, 0x1008, encode_x(5, 855));
+        put_instruction(&mut memory, 0x100C, encode_x(6, 887));
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
+        cpu.state.fpr[2] = -42.75;
+        cpu.state.gpr[3] = 0x1000;
+        cpu.state.gpr[4] = 0x18;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), 0x1234_5678_FFFF_FFD5);
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x1018)).unwrap(),
+            0xFFFF_FFD5
+        );
+        assert_eq!(cpu.state.fpr[5].to_bits(), 0xFFFF_FFFF_FFFF_FFD5);
+        assert_eq!(cpu.state.fpr[6].to_bits(), 0x0000_0000_FFFF_FFD5);
     }
 
     #[test]
@@ -2493,16 +3654,65 @@ mod tests {
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
+        cpu.state.fpr[3] = f64::from_bits(0x8765_4321_ABCDEF01);
         cpu.state.fpr[2] = 2.75;
         cpu.state.fpscr = 0; // nearest, ties to even
 
         cpu.step(&mut memory).unwrap();
-        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 0x1234_5678_0000_0003);
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: 2.75 rounded to 3
 
-        assert_eq!(cpu.state.fpr[1], 3.0);
-        assert_eq!(cpu.state.fpr[3], 2.0);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[3].to_bits(), 0x8765_4321_0000_0002);
+        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI: fractional bits were discarded
+        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // fctiwz truncates toward zero
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX: conversion was inexact
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX: sticky exception summary
+    }
+
+    #[test]
+    fn integer_conversion_overflow_saturates_by_sign() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // fctiw f1,f2; fctiw f3,f4; fctid f5,f6; fctid f7,f8
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (3 << 21) | (4 << 11) | (14 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (63 << 26) | (5 << 21) | (6 << 11) | (814 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x100C,
+            (63 << 26) | (7 << 21) | (8 << 11) | (814 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::INFINITY;
+        cpu.state.fpr[4] = f64::NEG_INFINITY;
+        cpu.state.fpr[6] = f64::INFINITY;
+        cpu.state.fpr[8] = f64::NEG_INFINITY;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.fpr[1].to_bits() as u32, i32::MAX as u32);
+        assert_eq!(cpu.state.fpr[3].to_bits() as u32, i32::MIN as u32);
+        assert_eq!(cpu.state.fpr[5].to_bits(), i64::MAX as u64);
+        assert_eq!(cpu.state.fpr[7].to_bits(), i64::MIN as u64);
+        assert_ne!(cpu.state.fpscr & (1 << 16), 0); // VXCVI
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
     }
 
     #[test]
