@@ -135,7 +135,15 @@ impl PpcInterpreter {
         self.state.cr[1] = ((self.state.fpscr >> 28) & 0x0F) as u8;
     }
 
-    fn update_fpscr_exceptions(&mut self, invalid: bool, div_zero: bool, overflow: bool, underflow: bool, inexact: bool, record: bool) {
+    fn update_fpscr_exceptions(
+        &mut self,
+        invalid: bool,
+        div_zero: bool,
+        overflow: bool,
+        underflow: bool,
+        inexact: bool,
+        record: bool,
+    ) {
         const FX: u32 = 1 << 31;
         const FEX: u32 = 1 << 30;
         const VX: u32 = 1 << 29;
@@ -150,11 +158,21 @@ impl PpcInterpreter {
         const XE: u32 = 1 << 3;
 
         let mut raised = 0;
-        if invalid { raised |= VX; }
-        if div_zero { raised |= ZX; }
-        if overflow { raised |= OX; }
-        if underflow { raised |= UX; }
-        if inexact { raised |= XX; }
+        if invalid {
+            raised |= VX;
+        }
+        if div_zero {
+            raised |= ZX;
+        }
+        if overflow {
+            raised |= OX;
+        }
+        if underflow {
+            raised |= UX;
+        }
+        if inexact {
+            raised |= XX;
+        }
         if raised != 0 {
             self.state.fpscr |= FX | raised;
         }
@@ -163,8 +181,14 @@ impl PpcInterpreter {
             || (underflow && self.state.fpscr & UE != 0)
             || (div_zero && self.state.fpscr & ZE != 0)
             || (inexact && self.state.fpscr & XE != 0));
-        if enabled { self.state.fpscr |= FEX; } else { self.state.fpscr &= !FEX; }
-        if record { self.copy_fpscr_to_cr1(); }
+        if enabled {
+            self.state.fpscr |= FEX;
+        } else {
+            self.state.fpscr &= !FEX;
+        }
+        if record {
+            self.copy_fpscr_to_cr1();
+        }
     }
 
     fn update_fpscr_for_result(&mut self, value: f64, operands: &[f64], record: bool) {
@@ -1032,7 +1056,8 @@ impl PpcInterpreter {
                 // FPSCR field moves and bit operations use PowerPC's MSB-first
                 // bit numbering. They do not execute an arithmetic operation.
                 match xo10 {
-                    64 => { // mcrfs CRFD,CRFS
+                    64 => {
+                        // mcrfs CRFD,CRFS
                         let crfd = ((instruction >> 23) & 0x7) as usize;
                         let crfs = ((instruction >> 18) & 0x7) as usize;
                         let shift = 28 - crfs * 4;
@@ -1042,15 +1067,21 @@ impl PpcInterpreter {
                         self.state.pc = next_pc;
                         return Ok(());
                     }
-                    38 | 70 => { // mtfsb1 / mtfsb0
+                    38 | 70 => {
+                        // mtfsb1 / mtfsb0
                         let bit = ((instruction >> 21) & 0x1F) as u32;
                         let mask = 1_u32 << (31 - bit);
-                        if xo10 == 38 { self.state.fpscr |= mask; } else { self.state.fpscr &= !mask; }
+                        if xo10 == 38 {
+                            self.state.fpscr |= mask;
+                        } else {
+                            self.state.fpscr &= !mask;
+                        }
                         if record { self.copy_fpscr_to_cr1(); }
                         self.state.pc = next_pc;
                         return Ok(());
                     }
-                    134 => { // mtfsfi BF,IMM
+                    134 => {
+                        // mtfsfi BF,IMM
                         let field = ((instruction >> 23) & 0x7) as usize;
                         let immediate = ((instruction >> 12) & 0xF) as u8;
                         self.write_fpscr_field(field, immediate);
@@ -1058,7 +1089,8 @@ impl PpcInterpreter {
                         self.state.pc = next_pc;
                         return Ok(());
                     }
-                    711 => { // mtfsf FM,FRB (and the Xenia-supported L form)
+                    711 => {
+                        // mtfsf FM,FRB (and the Xenia-supported L form)
                         let field_mask = ((instruction >> 17) & 0xFF) as u8;
                         let value = self.state.fpr[frb] as u32;
                         if instruction & (1 << 16) != 0 {
@@ -1070,8 +1102,7 @@ impl PpcInterpreter {
                                     mask |= 0xF << (28 - field * 4);
                                 }
                             }
-                            self.state.fpscr =
-                                (self.state.fpscr & !mask) | (value & mask);
+                            self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
                         if record { self.copy_fpscr_to_cr1(); }
                         self.state.pc = next_pc;
@@ -1950,6 +1981,131 @@ mod tests {
 
         assert_eq!(cpu.state.fpr[1], 3.0);
         assert_eq!(cpu.state.cr[1], 0x0B);
+    }
+
+    #[test]
+    fn fpscr_field_instructions_read_write_and_clear_fields() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_mtfsfi = |bf: u32, imm: u32| {
+            (63 << 26) | (bf << 23) | (imm << 12) | (134 << 1)
+        };
+        let encode_mcrfs = |crfd: u32, crfs: u32| {
+            (63 << 26) | (crfd << 23) | (crfs << 18) | (64 << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode_mtfsfi(0, 0xA));
+        put_instruction(&mut memory, 0x1004, encode_mtfsfi(7, 0x5));
+        put_instruction(&mut memory, 0x1008, encode_mcrfs(3, 0));
+        put_instruction(&mut memory, 0x100C, encode_mcrfs(4, 7));
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.cr[3], 0xA);
+        assert_eq!(cpu.state.cr[4], 0x5);
+        assert_eq!(cpu.state.fpscr & 0xF000_0000, 0);
+        assert_eq!(cpu.state.fpscr & 0xF, 0);
+    }
+
+    #[test]
+    fn fpscr_bit_and_masked_field_moves_preserve_unselected_bits() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode_mtfsb = |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
+        let encode_mtfsf = |fm: u32, rb: u32| {
+            (63 << 26) | (fm << 17) | (rb << 11) | (711 << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode_mtfsb(31, 38)); // set FPSCR[0]
+        put_instruction(&mut memory, 0x1004, encode_mtfsb(30, 70)); // clear FPSCR[1]
+        put_instruction(&mut memory, 0x1008, encode_mtfsf(0x80, 2)); // replace FPSCR field 0
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0x4000_0000;
+        cpu.state.fpr[2] = 0xB000_0000_u32 as f64;
+
+        for _ in 0..3 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.fpscr & 0xF000_0000, 0xB000_0000);
+    }
+
+    #[test]
+    fn floating_point_divide_updates_sticky_and_enabled_fpscr_exceptions() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv. f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 4; // ZE enable
+
+        cpu.step(&mut memory).unwrap();
+
+        assert!(cpu.state.fpr[1].is_infinite());
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+        assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
+        assert_eq!(cpu.state.cr[1], 0b1011);
+    }
+
+    #[test]
+    fn floating_point_compare_distinguishes_ordered_and_unordered_nan() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fcmpu cr2,f1,f2; fcmpo cr3,f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (2 << 23) | (1 << 16) | (2 << 11),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (3 << 23) | (1 << 16) | (2 << 11) | (32 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = f64::NAN;
+        cpu.state.fpr[2] = 1.0;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[2], 0b0001);
+        assert_eq!(cpu.state.fpscr & (1 << 29), 0);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[3], 0b0001);
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0);
+    }
+
+    #[test]
+    fn floating_point_integer_conversion_obeys_fpscr_rounding_and_truncation() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fctiw f1,f2; fctiwz f3,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (3 << 21) | (2 << 11) | (15 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 2.75;
+        cpu.state.fpscr = 0; // nearest, ties to even
+
+        cpu.step(&mut memory).unwrap();
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 3.0);
+        assert_eq!(cpu.state.fpr[3], 2.0);
     }
 
     #[test]
