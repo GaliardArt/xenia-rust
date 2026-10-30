@@ -1967,6 +1967,7 @@ impl PpcInterpreter {
                 let mut double_inexact = false;
                 let mut double_fraction_rounded = false;
                 let mut double_overflow = false;
+                let mut double_underflow = false;
                 if arithmetic && !single && update_status && !matches!(xo5, 23 | 24 | 26) {
                     let rounded = self.round_binary64_result(xo5, a, b, c, value);
                     value = rounded.0;
@@ -1982,7 +1983,7 @@ impl PpcInterpreter {
                     }
                     let double_tiny =
                         value.is_subnormal() || (value == 0.0 && double_inexact);
-                    let double_underflow = double_tiny
+                    double_underflow = double_tiny
                         && ((self.state.fpscr & (1 << 5) != 0) || double_inexact);
                     if double_underflow && self.state.fpscr & (1 << 5) != 0 {
                         let adjusted =
