@@ -3256,6 +3256,38 @@ mod tests {
     }
 
     #[test]
+    fn mcrfs_field_five_clears_all_low_invalid_causes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mcrfs cr0, FPSCR field 5
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (5 << 18) | (64 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = (1 << 10) | (1 << 9) | (1 << 8); // VXSOFT, VXSQRT, VXCVI
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.cr[0], 0x7);
+        assert_eq!(cpu.state.fpscr & 0x0000_0700, 0);
+        assert_eq!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+    }
+
+    #[test]
+    fn fpscr_vx_summary_excludes_fraction_and_result_flags() {
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.fpscr = (1 << 18) | (1 << 17) | 0x0001_F000;
+        cpu.refresh_fpscr_fex();
+        assert_eq!(cpu.state.fpscr & (1 << 29), 0);
+
+        cpu.state.fpscr |= 1 << 9; // VXSQRT
+        cpu.refresh_fpscr_fex();
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0);
+    }
+
+    #[test]
     fn fpscr_bit_and_masked_field_moves_preserve_unselected_bits() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode_mtfsb = |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
@@ -3812,7 +3844,7 @@ mod tests {
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpr[4] = f64::NAN;
         cpu.state.fpr[5] = 1.0;
-        cpu.state.fpscr = (1 << 7) | 0x0000_4000; // VE enabled; prior FPRF=positive
+        cpu.state.fpscr = (1 << 7) | 0x0001_4000; // VE enabled; prior positive-denormal FPRF (C=1)
         let prior_fprf = cpu.state.fpscr & 0x0001_F000;
 
         cpu.step(&mut memory).unwrap();
