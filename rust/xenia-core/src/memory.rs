@@ -10,12 +10,14 @@ pub struct GuestAddress(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryError {
     OutOfBounds,
+    AllocationFailed,
 }
 
 impl fmt::Display for MemoryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::OutOfBounds => f.write_str("guest memory access out of bounds"),
+            Self::AllocationFailed => f.write_str("unable to allocate guest memory"),
         }
     }
 }
@@ -31,10 +33,16 @@ pub struct GuestMemory {
 
 impl GuestMemory {
     pub fn new(base: GuestAddress, size: usize) -> Self {
-        Self {
-            base,
-            bytes: vec![0; size],
-        }
+        Self::try_new(base, size).expect("guest memory allocation failed")
+    }
+
+    pub fn try_new(base: GuestAddress, size: usize) -> Result<Self, MemoryError> {
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| MemoryError::AllocationFailed)?;
+        bytes.resize(size, 0);
+        Ok(Self { base, bytes })
     }
 
     pub const fn base(&self) -> GuestAddress {
@@ -47,6 +55,20 @@ impl GuestMemory {
 
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
+    }
+
+    pub fn write_bytes(&mut self, address: GuestAddress, data: &[u8]) -> Result<(), MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(data.len()).ok_or(MemoryError::OutOfBounds)?;
+        let destination = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        destination.copy_from_slice(data);
+        Ok(())
+    }
+
+    pub fn read_bytes(&self, address: GuestAddress, size: usize) -> Result<&[u8], MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(size).ok_or(MemoryError::OutOfBounds)?;
+        self.bytes.get(offset..end).ok_or(MemoryError::OutOfBounds)
     }
 
     pub fn read_u8(&self, address: GuestAddress) -> Result<u8, MemoryError> {
