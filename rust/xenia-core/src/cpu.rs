@@ -49,6 +49,30 @@ pub struct PpcInterpreter {
 }
 
 impl PpcInterpreter {
+    fn branch_condition(&mut self, bo: u8, bi: usize) -> bool {
+        let ignore_cr = bo & 0x10 != 0;
+        let expected_cr = bo & 0x08 != 0;
+        let ignore_ctr = bo & 0x04 != 0;
+        let branch_if_ctr_zero = bo & 0x02 != 0;
+
+        let condition_ok = if ignore_cr {
+            true
+        } else {
+            let field = bi / 4;
+            let bit = 1 << (3 - (bi % 4));
+            (self.state.cr[field] & bit != 0) == expected_cr
+        };
+
+        let count_ok = if ignore_ctr {
+            true
+        } else {
+            self.state.ctr = self.state.ctr.wrapping_sub(1);
+            (self.state.ctr != 0) != branch_if_ctr_zero
+        };
+
+        condition_ok && count_ok
+    }
+
     fn set_cr_field(&mut self, field: usize, ordering: Ordering) {
         let result = match ordering {
             Ordering::Less => 0b1000,
@@ -116,32 +140,48 @@ impl PpcInterpreter {
                 self.set_cr_field(field, left.cmp(&right));
                 self.state.pc = next_pc;
             }
-            // bc BO,BI,BD,AA,LK — initial support for CR-only beq/bne forms.
+            // bc BO,BI,BD,AA,LK — CR and CTR condition handling.
             16 => {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
-                if bo != 4 && bo != 12 {
-                    return Err(PpcError::UnsupportedBranchOption { pc, bo });
-                }
                 let bi = ((instruction >> 16) & 0x1F) as usize;
-                let field = bi / 4;
-                let bit = 1 << (3 - (bi % 4));
-                let condition = self.state.cr[field] & bit != 0;
-                let branch_if_true = bo == 12;
                 let displacement = ((((instruction >> 2) & 0x3FFF) << 2) as u16 as i16) as i32;
                 let absolute = instruction & 0x2 != 0;
+                let link = instruction & 1 != 0;
+                let taken = self.branch_condition(bo, bi);
+                if link {
+                    self.state.lr = next_pc as u64;
+                }
+                self.state.pc = if taken {
+                    if absolute {
+                        displacement as u32
+                    } else {
+                        pc.wrapping_add(displacement as u32)
+                    }
+                } else {
+                    next_pc
+                };
+            }
+            // bclr/bcctr — branch to the link or count register.
+            19 => {
+                let bo = ((instruction >> 21) & 0x1F) as u8;
+                let bi = ((instruction >> 16) & 0x1F) as usize;
+                let extended_opcode = (instruction >> 1) & 0x3FF;
+                let target = match extended_opcode {
+                    16 => self.state.lr as u32 & !3,
+                    528 => {
+                        if bo & 0x04 == 0 {
+                            return Err(PpcError::UnsupportedBranchOption { pc, bo });
+                        }
+                        self.state.ctr as u32 & !3
+                    }
+                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                };
+                let taken = self.branch_condition(bo, bi);
                 let link = instruction & 1 != 0;
                 if link {
                     self.state.lr = next_pc as u64;
                 }
-                if condition == branch_if_true {
-                    self.state.pc = if absolute {
-                        displacement as u32
-                    } else {
-                        pc.wrapping_add(displacement as u32)
-                    };
-                } else {
-                    self.state.pc = next_pc;
-                }
+                self.state.pc = if taken { target } else { next_pc };
             }
             // lwz RT,D(RA) — load a zero-extended 32-bit word.
             32 => {
