@@ -1724,6 +1724,10 @@ impl PpcInterpreter {
                 let mut conversion_invalid = false;
                 let mut conversion_inexact = false;
                 let mut conversion_fraction_rounded = false;
+                let mut frsp_overflow = false;
+                let mut frsp_underflow = false;
+                let mut frsp_inexact = false;
+                let mut frsp_fraction_rounded = false;
                 let mut value = match xo10 {
                     264 => b.abs(),  // fabs
                     72 => b,         // fmr
@@ -1731,7 +1735,38 @@ impl PpcInterpreter {
                     40 => -b,        // fneg
                     12 => {
                         update_status = true;
-                        self.round_to_single(b)
+                        frsp_overflow = b.is_finite() && b.abs() > f32::MAX as f64;
+                        let tiny = b != 0.0 && b.abs() < f32::MIN_POSITIVE as f64;
+                        let overflow_enabled =
+                            frsp_overflow && self.state.fpscr & (1 << 6) != 0;
+                        let underflow_enabled = tiny && self.state.fpscr & (1 << 5) != 0;
+                        let adjusted_value = if overflow_enabled {
+                            Self::scale_by_power_of_two(b, -192)
+                        } else if underflow_enabled {
+                            Self::scale_by_power_of_two(b, 192)
+                        } else {
+                            b
+                        };
+                        let adjusted = overflow_enabled || underflow_enabled;
+                        let rounded = if adjusted {
+                            self.round_to_single_significand(adjusted_value)
+                        } else {
+                            self.round_to_single(b)
+                        };
+                        frsp_inexact = if adjusted {
+                            rounded != adjusted_value
+                        } else {
+                            (b.is_finite() && rounded.is_finite() && rounded != b)
+                                || (frsp_overflow && !overflow_enabled)
+                        };
+                        frsp_underflow = tiny && (underflow_enabled || frsp_inexact);
+                        frsp_fraction_rounded = !frsp_overflow
+                            && if adjusted {
+                                rounded.abs() > adjusted_value.abs()
+                            } else {
+                                frsp_inexact && b.is_finite() && rounded.abs() > b.abs()
+                            };
+                        rounded
                     } // frsp
                     14 | 15 | 814 | 815 => {
                         // fctiw/z and fctid/z
@@ -1927,9 +1962,7 @@ impl PpcInterpreter {
                         } else if matches!(xo10, 14 | 15 | 814 | 815 | 846) {
                             conversion_inexact
                         } else {
-                            xo10 == 12
-                                && b.is_finite()
-                                && (value.is_infinite() || value != b)
+                            frsp_inexact
                         };
                         if matches!(xo10, 14 | 15 | 814 | 815) {
                             self.update_fpscr_exceptions(
@@ -1960,13 +1993,10 @@ impl PpcInterpreter {
                                 } else if xo10 == 846 {
                                     conversion_fraction_rounded
                                 } else {
-                                    inexact && b.is_finite() && value.abs() > b.abs()
+                                    frsp_fraction_rounded
                                 },
-                                double_overflow
-                                    || value.is_infinite()
-                                    || (xo10 == 12
-                                        && b.is_finite()
-                                        && b.abs() > f32::MAX as f64),
+                                double_overflow || frsp_overflow,
+                                frsp_underflow,
                                 xo10 == 12,
                                 record,
                             );
