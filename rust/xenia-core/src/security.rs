@@ -37,6 +37,7 @@ pub enum SecurityInfoError {
     TruncatedFixedHeader,
     DescriptorTableOverflow,
     DescriptorTableOutOfBounds,
+    DescriptorTableOutsideHeader,
     InvalidSectionType,
     InvalidImageSize,
 }
@@ -101,6 +102,9 @@ pub fn parse_xex2_security_info(
     let descriptor_end = fixed_end
         .checked_add(descriptor_bytes)
         .ok_or(SecurityInfoError::DescriptorTableOverflow)?;
+    if descriptor_end > header.header_size as usize {
+        return Err(SecurityInfoError::DescriptorTableOutsideHeader);
+    }
     let descriptor_table = bytes
         .get(fixed_end..descriptor_end)
         .ok_or(SecurityInfoError::DescriptorTableOutOfBounds)?;
@@ -157,7 +161,7 @@ mod tests {
     fn header() -> XexHeader {
         XexHeader {
             module_flags: 0,
-            header_size: 0x40,
+            header_size: 0x1000,
             reserved: 0,
             security_info_offset: 0x40,
             optional_headers: Vec::new(),
@@ -210,6 +214,16 @@ mod tests {
         assert_eq!(
             parse_xex2_security_info(&bytes, &header()),
             Err(SecurityInfoError::InvalidImageSize)
+        );
+    }
+
+    #[test]
+    fn rejects_descriptor_table_outside_declared_xex_header() {
+        let mut invalid_header = header();
+        invalid_header.header_size = 0x40 + 0x184;
+        assert_eq!(
+            parse_xex2_security_info(&fixture(1), &invalid_header),
+            Err(SecurityInfoError::DescriptorTableOutsideHeader)
         );
     }
 
