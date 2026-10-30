@@ -352,7 +352,9 @@ impl PpcInterpreter {
                         let value = product as u32 as i32 as i64 as u64;
                         let overflow = product != (product as i32 as i64);
                         self.state.gpr[rt_rs] = value;
-                        if oe { self.update_overflow(overflow); }
+                        if oe {
+                            self.update_overflow(overflow);
+                        }
                         if record {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
@@ -370,7 +372,9 @@ impl PpcInterpreter {
                         };
                         let value = ((a * b) >> 32) as u64;
                         self.state.gpr[rt_rs] = value;
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     459 | 491 | 971 | 1003 => {
                         let dividend = self.state.gpr[ra] as u32;
