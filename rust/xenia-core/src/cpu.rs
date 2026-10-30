@@ -2123,7 +2123,7 @@ impl PpcInterpreter {
                                     && !divide_by_zero
                                     && operands.iter().all(|operand| operand.is_finite()))
                         };
-                        let underflow = tiny && (underflow_enabled || inexact);
+                        let underflow = tiny && inexact;
                         let invalid_enabled = self.update_fpscr_for_result(
                             rounded,
                             operands,
@@ -4513,5 +4513,27 @@ mod tests {
             cpu.step(&mut memory),
             Err(PpcError::Memory(MemoryError::OutOfBounds))
         );
+    }
+
+    #[test]
+    fn exact_single_precision_subnormal_does_not_raise_underflow_when_ue_is_enabled() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f32::from_bits(1) as f64;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 5; // UE enabled
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(1) as f64).to_bits());
+        assert_eq!(cpu.state.fpscr & (1 << 27), 0); // exact subnormal: no UX
+        assert_eq!(cpu.state.fpscr & (1 << 30), 0); // no enabled exception summary
     }
 }
