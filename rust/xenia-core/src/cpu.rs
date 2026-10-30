@@ -508,6 +508,52 @@ mod tests {
     }
 
     #[test]
+    fn addic_sets_carry_and_andi_updates_cr0() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // addic r4,r3,1
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (12 << 26) | (4 << 21) | (3 << 16) | 1,
+        );
+        // andi. r5,r4,0xFFFF
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (28 << 26) | (5 << 21) | (4 << 16) | 0xFFFF,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = u64::MAX;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[4], 0);
+        assert_ne!(cpu.state.xer & (1 << 29), 0);
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[5], 0);
+        assert_eq!(cpu.state.cr[0] & 0x0E, 0b0010);
+    }
+
+    #[test]
+    fn mulli_reads_gpr_zero_as_a_register() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mulli r4,r0,2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (7 << 26) | (4 << 21) | (2 << 0),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[0] = 3;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.gpr[4], 6);
+    }
+
+    #[test]
     fn rlwinm_rotates_and_masks_word_results() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // rlwinm r4,r3,8,8,23
