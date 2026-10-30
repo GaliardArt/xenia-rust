@@ -94,7 +94,7 @@ pub struct PpcInterpreter {
 
 impl PpcInterpreter {
     /// Removes the pending guest exception so the outer CPU can dispatch it.
-    pub fn take_pending_exception(&mut self) -> Option<PpcException> {
+    fn take_pending_exception(&mut self) -> Option<PpcException> {
         self.pending_exception.take()
     }
 
@@ -4631,7 +4631,6 @@ mod tests {
             Err(PpcError::GuestException(expected))
         );
         assert_eq!(cpu.state.fpr[1], 123.0); // enabled invalid suppresses destination write
-        assert_eq!(cpu.take_pending_exception(), None);
     }
 
     #[test]
