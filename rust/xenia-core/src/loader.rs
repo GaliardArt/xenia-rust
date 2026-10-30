@@ -38,7 +38,7 @@ pub enum XexLoadError {
     Pe(PeError),
     Layout(LayoutError),
     AddressSpace(AddressSpaceError),
-    SectionDataOutOfBounds,
+    ImageSizeDoesNotMatchPageTable,
     MappedImageTooLarge,
     MissingFileFormatHeader,
     FileFormatHeaderOutOfBounds,
@@ -60,7 +60,9 @@ impl fmt::Display for XexLoadError {
             Self::Pe(error) => write!(f, "embedded PE image: {error}"),
             Self::Layout(error) => write!(f, "PE image layout: {error}"),
             Self::AddressSpace(error) => write!(f, "guest memory mapping: {error}"),
-            Self::SectionDataOutOfBounds => f.write_str("PE section data exceeds image bounds"),
+            Self::ImageSizeDoesNotMatchPageTable => {
+                f.write_str("XEX image size does not match its page-descriptor table")
+            }
             Self::MappedImageTooLarge => f.write_str("mapped PE image exceeds the safety limit"),
             Self::MissingFileFormatHeader => {
                 f.write_str("XEX file-format optional header is missing")
@@ -123,50 +125,71 @@ impl From<LayoutError> for XexLoadError {
 }
 
 impl XexLoadedImage {
-    /// Maps all PE sections transactionally. Existing address-space contents are
-    /// preserved if any section is malformed or overlaps an existing mapping.
+    /// Maps the decompressed image using XEX page descriptors.
+    ///
+    /// The operation is transactional: on any invalid descriptor or mapping
+    /// conflict, the caller's address space remains unchanged.
     pub fn map_into(
         &self,
         address_space: &mut GuestAddressSpace,
     ) -> Result<(), XexLoadError> {
-        if self.layout.sections.len() != self.pe.sections.len() {
-            return Err(XexLoadError::SectionDataOutOfBounds);
-        }
-        let total_size = self.layout.sections.iter().try_fold(0_usize, |total, section| {
-            total
-                .checked_add(section.size as usize)
-                .ok_or(XexLoadError::MappedImageTooLarge)
-        })?;
-        if total_size > MAX_IMAGE_SIZE {
+        let page_size = if self.security.image_flags & 0x1000_0000 != 0 {
+            0x1000_usize
+        } else {
+            0x1_0000_usize
+        };
+        let mapped_size = self.security.page_descriptors.iter().try_fold(
+            0_usize,
+            |total, descriptor| {
+                let descriptor_size = (descriptor.page_count as usize)
+                    .checked_mul(page_size)
+                    .ok_or(XexLoadError::MappedImageTooLarge)?;
+                total
+                    .checked_add(descriptor_size)
+                    .ok_or(XexLoadError::MappedImageTooLarge)
+            },
+        )?;
+        if mapped_size > MAX_IMAGE_SIZE {
             return Err(XexLoadError::MappedImageTooLarge);
+        }
+        if mapped_size == 0 || mapped_size != self.image.len() {
+            return Err(XexLoadError::ImageSizeDoesNotMatchPageTable);
         }
 
         let mut staged = address_space.clone();
-        for (layout_section, pe_section) in
-            self.layout.sections.iter().zip(&self.pe.sections)
-        {
-            if layout_section.size == 0 {
+        let mut offset = 0_usize;
+        for descriptor in &self.security.page_descriptors {
+            let size = (descriptor.page_count as usize)
+                .checked_mul(page_size)
+                .ok_or(XexLoadError::MappedImageTooLarge)?;
+            if size == 0 {
                 continue;
             }
-            let raw_size = pe_section.raw_size as usize;
-            let raw_end = (pe_section.raw_pointer as usize)
-                .checked_add(raw_size)
-                .ok_or(XexLoadError::SectionDataOutOfBounds)?;
-            let raw_data = self
+            let end = offset
+                .checked_add(size)
+                .ok_or(XexLoadError::MappedImageTooLarge)?;
+            let bytes = self
                 .image
-                .get(pe_section.raw_pointer as usize..raw_end)
-                .ok_or(XexLoadError::SectionDataOutOfBounds)?;
-            let permissions = MemoryPermissions {
-                read: layout_section.readable,
-                write: layout_section.writable,
-                execute: layout_section.executable,
+                .get(offset..end)
+                .ok_or(XexLoadError::ImageSizeDoesNotMatchPageTable)?;
+            let permissions = match descriptor.section_type {
+                1 => MemoryPermissions::READ_EXECUTE,
+                2 => MemoryPermissions::READ_WRITE,
+                3 => MemoryPermissions::READ_ONLY,
+                _ => return Err(XexLoadError::ImageSizeDoesNotMatchPageTable),
             };
+            let address = self
+                .layout
+                .load_base
+                .checked_add(u32::try_from(offset).map_err(|_| XexLoadError::MappedImageTooLarge)?)
+                .ok_or(XexLoadError::MappedImageTooLarge)?;
             staged.map_initialized(
-                GuestAddress(layout_section.address),
-                layout_section.size as usize,
+                GuestAddress(address),
+                size,
                 permissions,
-                raw_data,
+                bytes,
             )?;
+            offset = end;
         }
 
         *address_space = staged;
@@ -392,12 +415,12 @@ mod tests {
     fn valid_xex() -> Vec<u8> {
         let payload = valid_pe();
         let security_offset = 0x40;
-        let security_size = 0x184;
+        let security_size = 0x184 + 0x18;
         let format_offset = security_offset + security_size;
         let format_size = 8;
         let header_size = format_offset + format_size;
         let image_offset = header_size;
-        let mut bytes = vec![0; image_offset + payload.len()];
+        let mut bytes = vec![0; image_offset + 0x1000];
 
         bytes[0..4].copy_from_slice(b"XEX2");
         put_u32_be(&mut bytes, 4, 0);
@@ -409,7 +432,7 @@ mod tests {
         put_u32_be(&mut bytes, 28, format_offset as u32);
 
         put_u32_be(&mut bytes, security_offset, security_size as u32);
-        put_u32_be(&mut bytes, security_offset + 4, payload.len() as u32);
+        put_u32_be(&mut bytes, security_offset + 4, 0x1000);
         put_u32_be(&mut bytes, security_offset + 0x108, security_size as u32);
         put_u32_be(&mut bytes, security_offset + 0x110, 0x8200_0000);
         put_u32_be(&mut bytes, security_offset + 0x180, 0);
@@ -417,7 +440,7 @@ mod tests {
         put_u32_be(&mut bytes, format_offset, format_size as u32);
         put_u16_be(&mut bytes, format_offset + 4, 0);
         put_u16_be(&mut bytes, format_offset + 6, 0);
-        bytes[image_offset..].copy_from_slice(&payload);
+        bytes[image_offset..image_offset + payload.len()].copy_from_slice(&payload);
         bytes
     }
 
