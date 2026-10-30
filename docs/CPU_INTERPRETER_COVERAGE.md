@@ -33,7 +33,7 @@ architectural conformance.
 | Branch/control | b, bc, bclr, bcctr; CR bit logical subset; mfspr/mtspr for XER/LR/CTR | traps, syscall/system instructions, remaining SPR/TBR/MSR, synchronization, complete BO/BI combinations and exception semantics absent. |
 | Integer memory | lbz/lhz/lha/stb/sth/lwz/stw; D-form update loads/stores; indexed byte/halfword/word forms and updates; lmw/stmw | string operations, byte-reverse, reservation/conditional, DS-form, integer 64-bit loads/stores, alignment exceptions, and complete store-range atomicity are absent. |
 | Scalar FP memory | lfs/lfd/stfs/stfd and indexed forms | FPSCR effects, NaN payloads, denormal/rounding behavior, precise FP exceptions and atomic 64-bit memory access need work. |
-| Scalar FP execution | small arithmetic/compare/conversion/select subset | current operations are approximations: FPSCR is not modeled architecturally, conversion/rounding is incomplete, single-precision instruction distinctions and exception flags need validation. |
+| Scalar FP execution | fadd/fadds, fsub/fsubs, fdiv/fdivs, fmul/fmuls, fsel, fsqrt/fsqrts, fres, frsqrte, fmadd/fmsub/fnmadd/fnmsub and single variants; fabs/fmr/fnabs/fneg/frsp; fctiw/fctiwz/fctid/fctidz/fcfid; fcmpu/fcmpo; mcrfs/mffs/mtfsb0/mtfsb1/mtfsf/mtfsfi | FPSCR core status, FPRF, field moves, sticky summaries, invalid subcauses, conversion rounding, and single-result directed rounding are implemented. Exact binary64 directed rounding, full FR behavior, precise exception delivery, NaN payload fidelity, and hardware reciprocal estimates remain incomplete. |
 | VMX/AltiVec | selected byte/halfword/word add/sub and basic logical operations; aligned vector load/store | most VMX instructions absent: compares, saturation, permute, pack/unpack, shifts, floating-point vector ops, VSCR semantics, and Xenon VMX128 encodings/register operands. |
 | Exceptions | memory errors and unsupported-opcode errors surface to caller | no architectural program/data/alignment/FPU exceptions, interrupt state, exception vectors, or precise fault/retirement model. |
 
@@ -42,7 +42,7 @@ architectural conformance.
 These are audit findings to resolve before treating the corresponding family as complete. Resolved findings are retained here as regression history:
 
 1. **64-bit divide decode/semantics — corrected:** the initial implementation confused OE-enabled XO encodings with separate operations and truncated 64-bit operands. The Rust decoder now distinguishes `divdu` (XO 457), `divwu` (459), `divd` (489), and `divw` (491), including their OE-enabled encodings. Regression tests cover high-bit operands, word truncation, divide-by-zero, and signed minimum divided by -1. CI passed on commit `5daf1e6b2346252193a7738d89041ebd88477408`.
-2. **Floating-point is approximate:** FPR values are represented as host `f64`; current conversions and arithmetic do not implement full FPSCR, rounding modes, exception flags, NaN behavior, or Xenon-specific details. Do not use this subset as evidence of game compatibility.
+2. **Floating-point fidelity — substantially expanded, still incomplete:** the interpreter now models the principal FPSCR status/control paths and scalar FP instruction subset, but host `f64` arithmetic still rounds binary64 operations using the host's default mode. Exact binary64 directed rounding, full FR/FI behavior, precise FP exception delivery, NaN payload preservation, and Xenon-specific reciprocal estimates still need work. Do not use this subset as evidence of game compatibility.
 3. **64-bit FP memory operations — corrected:** the original pair of 32-bit accesses could partially complete if the second access faulted. `GuestMemoryAccess` now exposes checked big-endian 64-bit reads/writes; contiguous memory and mapped address space implement them as single range-checked operations. The interpreter's `lfd/stfd` and indexed equivalents now use these operations. Tests cover endianness, short ranges, permissions, and cross-region rejection.
 4. **VMX register model is incomplete:** the state allocates 128 vector slots, but the current primary-opcode-4 decoder uses ordinary 5-bit register fields and a small set of standard VMX XO values. This does not implement the Xenon VMX128 instruction encoding space.
 5. **Instruction coverage is not machine-counted:** dispatch is hand-written and currently groups many operations under primary opcodes. A generated manifest derived from the C++ opcode metadata/lookup tables is required for defensible coverage reporting.
@@ -53,6 +53,8 @@ These are audit findings to resolve before treating the corresponding family as 
 
 9. **Special-purpose register transfers — partial:** `mfspr`/`mtspr` now handle the XER, LR, and CTR registers represented in `PpcState`. Other SPRs, time-base registers, privilege checks, and system-register semantics remain unsupported.
 
+10. **Scalar FPU/FPSCR — core execution and control paths implemented:** scalar arithmetic, fused operations, compare, select, square root/reciprocal operations, single rounding, integer conversions, and the FPSCR control family (mcrfs, mffs, mtfsb0, mtfsb1, mtfsf, mtfsfi) are implemented. FPSCR now tracks FX/FEX/VX/OX/UX/ZX/XX, the supported invalid-operation subcauses, FI, and the FPRF result/compare classification. FEX is recomputed from sticky exception flags and their enables; Rc copies FPSCR[0:3] into CR1. FPSCR rounding modes are applied to integer conversions and binary32 result rounding. Regression coverage includes directed frsp rounding, FPRF classes, NaN compare behavior, invalid-operation subcauses, and enabled divide-by-zero. The C++ Xenia HIR builder itself leaves much of UpdateFPSCR stubbed, so its output is not a complete oracle for FPSCR flags. Remaining gaps: exact binary64 directed rounding, complete FR semantics, precise exception/trap delivery, NaN payload preservation, and Xenon-specific reciprocal estimates. The workspace CI passed with 80 tests on the implementation commit.
+
 ## Reference source map
 
 The original C++ implementation remains unchanged and is the behavioral reference:
@@ -62,7 +64,8 @@ The original C++ implementation remains unchanged and is the behavioral referenc
 - `src/xenia/cpu/ppc/ppc_emit_alu.cc`: integer arithmetic/logical/shift emitters.
 - `src/xenia/cpu/ppc/ppc_emit_control.cc`: branch, control, trap, and system behavior.
 - `src/xenia/cpu/ppc/ppc_emit_memory.cc`: load/store and memory semantics.
-- `src/xenia/cpu/ppc/ppc_emit_fpu.cc`: scalar floating-point behavior.
+- `src/xenia/cpu/ppc/ppc_emit_fpu.cc`: scalar floating-point instruction behavior.
+- `src/xenia/cpu/ppc/ppc_hir_builder.cc`: reference FPSCR helpers; UpdateFPSCR is intentionally stubbed in this C++ path and must not be treated as a complete exception-status oracle.
 - `src/xenia/cpu/ppc/ppc_emit_altivec.cc`: VMX/AltiVec behavior.
 - `src/xenia/cpu/ppc/ppc_context.h`: architectural register/context layout.
 
