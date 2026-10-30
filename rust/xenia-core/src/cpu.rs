@@ -163,7 +163,7 @@ impl PpcInterpreter {
         const ZE: u32 = 1 << 4;
         const XE: u32 = 1 << 3;
 
-        const VX_CAUSES: u32 = 0x01FF_0000;
+        const VX_CAUSES: u32 = 0x01F8_0700;
 
         if self.state.fpscr & VX_CAUSES != 0 {
             self.state.fpscr |= VX;
@@ -233,7 +233,7 @@ impl PpcInterpreter {
     }
 
     fn set_fprf_for_value_precision(&mut self, value: f64, single_precision: bool) {
-        const FPRF_MASK: u32 = 0x0000_3E00;
+        const FPRF_MASK: u32 = 0x0001_F000;
         let denormal = if single_precision {
             value.abs() < f32::MIN_POSITIVE as f64
         } else {
@@ -252,15 +252,15 @@ impl PpcInterpreter {
         } else {
             0x04
         };
-        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 9);
+        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 12);
     }
 
     fn set_fprf_condition(&mut self, condition: u8) {
         // Compare instructions update the four-bit FPCC field, not the
         // separate FPRF class bit C.
-        const FPCC_MASK: u32 = 0x0000_1E00;
+        const FPCC_MASK: u32 = 0x0000_F000;
         self.state.fpscr =
-            (self.state.fpscr & !FPCC_MASK) | (((condition as u32) & 0x0F) << 9);
+            (self.state.fpscr & !FPCC_MASK) | (((condition as u32) & 0x0F) << 12);
     }
 
     fn is_signaling_nan(value: f64) -> bool {
@@ -338,7 +338,7 @@ impl PpcInterpreter {
                 invalid_cause |= 1 << 23; // VXISI
             }
             22 | 26 if operands.last().is_some_and(|operand| *operand < 0.0) => {
-                invalid_cause |= 1 << 17; // VXSQRT
+                invalid_cause |= 1 << 9; // VXSQRT
             }
             _ => {}
         }
@@ -1698,7 +1698,8 @@ impl PpcInterpreter {
                             0 => (1 << 31) | (1 << 28), // FX and OX; FEX/VX are summaries.
                             1 => 0x0F00_0000,          // UX, ZX, XX, VXSNAN.
                             2 => 0x00F0_0000,          // VXISI, VXIDI, VXZDZ, VXIMZ.
-                            3 => 0x000F_0000,          // VXVC, VXSOFT, VXSQRT, VXCVI.
+                            3 => (1 << 19) | (1 << 18) | (1 << 17), // VXVC, FR, FI.
+                            5 => 0x0000_0700,          // VXSOFT, VXSQRT, VXCVI.
                             _ => 0,                   // Non-exception status/control fields.
                         };
                         self.state.fpscr &= !clear_mask;
@@ -1908,7 +1909,7 @@ impl PpcInterpreter {
                         update_status = true;
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
                             conversion_invalid = true;
-                            self.state.fpscr |= 1 << 16; // VXCVI
+                            self.state.fpscr |= 1 << 8; // VXCVI
                             let negative_or_nan = rounded.is_nan() || rounded < min;
                             if xo10 == 14 || xo10 == 15 {
                                 let integer = if negative_or_nan {
@@ -2916,7 +2917,7 @@ mod tests {
         assert_eq!(cpu.state.fpr[4], (3.75_f32) as f64);
         assert_eq!(cpu.state.fpr[5], 5.625);
         assert_eq!(cpu.state.cr[2], 0b0100);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF: greater
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF: greater
     }
 
     #[test]
@@ -2935,7 +2936,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], f32::from_bits(1) as f64);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2800); // positive single denormal
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_4000); // positive single denormal
     }
 
     #[test]
@@ -3099,7 +3100,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_2000); // negative zero
         assert_eq!(cpu.state.fpscr & 0xE000_0000, 0); // no FX/FEX/VX
 
         // The single-precision fsel. form also copies FPSCR[0:3] to CR1.
@@ -3355,7 +3356,7 @@ mod tests {
         );
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2200); // quiet NaN
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_1000); // quiet NaN
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[3], 0b0001);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0);
@@ -3822,8 +3823,8 @@ mod tests {
         cpu.state.fpscr = (1 << 7) | prior_fprf;
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VXVC
-        assert_eq!(cpu.state.fpscr & (1 << 13), prior_fprf & (1 << 13)); // C preserved
-        assert_eq!(cpu.state.fpscr & 0x0000_1E00, 1 << 9); // FPCC = unordered
+        assert_eq!(cpu.state.fpscr & (1 << 16), prior_fprf & (1 << 16)); // C preserved
+        assert_eq!(cpu.state.fpscr & 0x0000_F000, 1 << 12); // FPCC = unordered
     }
 
     #[test]
@@ -3871,7 +3872,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 99.0);
-        assert_ne!(cpu.state.fpscr & (1 << 16), 0); // VXCVI
+        assert_ne!(cpu.state.fpscr & (1 << 8), 0); // VXCVI
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
     }
@@ -3963,7 +3964,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert!(cpu.state.fpr[1].is_nan());
-        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
     }
