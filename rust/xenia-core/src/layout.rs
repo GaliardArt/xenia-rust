@@ -104,3 +104,74 @@ pub fn plan_image_layout(image: &XboxPeImage, load_base: u32) -> Result<ImageLay
 
     Ok(ImageLayout { load_base, entry_point, image_end_exclusive, sections })
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::{LayoutError, plan_image_layout};
+    use crate::pe::{PeSection, XboxPeImage};
+
+    fn section(name: &[u8], rva: u32, size: u32, flags: u32) -> PeSection {
+        let mut section_name = [0; 8];
+        section_name[..name.len()].copy_from_slice(name);
+        PeSection {
+            name: section_name,
+            virtual_size: size,
+            virtual_address: rva,
+            raw_size: size,
+            raw_pointer: 0,
+            characteristics: flags,
+        }
+    }
+
+    fn image(sections: Vec<PeSection>) -> XboxPeImage {
+        XboxPeImage {
+            entry_point_rva: 0x1000,
+            image_base: 0x8200_0000,
+            subsystem: 14,
+            sections,
+        }
+    }
+
+    #[test]
+    fn computes_addresses_and_permissions_without_mapping() {
+        let parsed = image(vec![
+            section(b".text", 0x1000, 0x1000, 0x6000_0020),
+            section(b".data", 0x3000, 0x800, 0xC000_0040),
+        ]);
+        let layout = plan_image_layout(&parsed, 0x8200_0000).unwrap();
+        assert_eq!(layout.entry_point, 0x8200_1000);
+        assert_eq!(layout.sections[0].address, 0x8200_1000);
+        assert!(layout.sections[0].readable);
+        assert!(layout.sections[0].executable);
+        assert!(!layout.sections[0].writable);
+        assert!(layout.sections[1].writable);
+        assert_eq!(layout.image_end_exclusive, 0x8200_3800);
+    }
+
+    #[test]
+    fn rejects_overlapping_sections() {
+        let parsed = image(vec![
+            section(b".text", 0x1000, 0x1000, 0x6000_0020),
+            section(b".data", 0x1800, 0x100, 0xC000_0040),
+        ]);
+        assert_eq!(
+            plan_image_layout(&parsed, 0x8200_0000),
+            Err(LayoutError::OverlappingSections)
+        );
+    }
+
+    #[test]
+    fn rejects_address_overflow_and_non_executable_entry() {
+        let parsed = image(vec![section(b".text", 0x1000, 0x100, 0x6000_0020)]);
+        assert_eq!(
+            plan_image_layout(&parsed, 0xFFFF_F000),
+            Err(LayoutError::AddressOverflow)
+        );
+        let parsed = image(vec![section(b".data", 0x1000, 0x1000, 0xC000_0040)]);
+        assert_eq!(
+            plan_image_layout(&parsed, 0x8200_0000),
+            Err(LayoutError::EntryPointNotExecutable)
+        );
+    }
+}
