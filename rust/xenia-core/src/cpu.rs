@@ -8,7 +8,7 @@ use core::cmp::Ordering;
 use crate::address_space::AddressSpaceError;
 use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PpcState {
     /// General-purpose registers. The Xenon PPC context uses 64-bit GPR storage.
     pub gpr: [u64; 32],
@@ -22,6 +22,23 @@ pub struct PpcState {
     pub cr: [u8; 8],
     pub fpscr: u32,
     pub vscr: u32,
+}
+
+impl Default for PpcState {
+    fn default() -> Self {
+        Self {
+            gpr: [0; 32],
+            fpr: [0.0; 32],
+            vr: [[0; 16]; 128],
+            pc: 0,
+            lr: 0,
+            ctr: 0,
+            xer: 0,
+            cr: [0; 8],
+            fpscr: 0,
+            vscr: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
