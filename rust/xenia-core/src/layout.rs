@@ -66,7 +66,8 @@ pub fn plan_image_layout(image: &XboxPeImage, load_base: u32) -> Result<ImageLay
         let address = load_base
             .checked_add(section.virtual_address)
             .ok_or(LayoutError::AddressOverflow)?;
-        let end = address as u64 + section.virtual_size as u64;
+        let mapped_size = section.virtual_size.max(section.raw_size);
+        let end = address as u64 + mapped_size as u64;
         if end > ADDRESS_SPACE_END {
             return Err(LayoutError::AddressOverflow);
         }
@@ -74,7 +75,7 @@ pub fn plan_image_layout(image: &XboxPeImage, load_base: u32) -> Result<ImageLay
         let loaded = LoadedSection {
             name: section.name,
             address,
-            size: section.virtual_size,
+            size: mapped_size,
             readable: section.characteristics & READ != 0,
             writable: section.characteristics & WRITE != 0,
             executable: section.characteristics & EXECUTE != 0,
