@@ -30,7 +30,7 @@ The long-term objective is to build toward Xbox 360 game execution while preserv
 
 ## Current status
 
-The rewrite has completed its initial repository audit and is implementing the executable-loading foundation. The Rust workspace now includes checked guest memory, a small PPC interpreter subset, XEX2 and Xbox PE metadata parsing, and a restricted unencrypted/uncompressed XEX2 image path. This remains an early experimental foundation, not a playable emulator.
+The rewrite has completed its initial repository audit and is implementing the executable-loading foundation. The Rust workspace now includes checked guest memory, a small PPC interpreter subset, XEX2 and Xbox PE metadata parsing, and a restricted unencrypted XEX2 image path for no-compression and basic-compression profiles. This remains an early experimental foundation, not a playable emulator.
 
 | Area | Current direction |
 |---|---|
