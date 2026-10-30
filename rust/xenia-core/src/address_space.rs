@@ -112,11 +112,47 @@ impl GuestAddressSpace {
         }
 
         self.regions.push(Region {
-            memory: GuestMemory::new(base, size),
+            memory: GuestMemory::try_new(base, size)?,
             permissions,
         });
         self.regions.sort_by_key(Region::start);
         Ok(())
+    }
+
+    /// Maps a zero-filled region and initializes its prefix from guest image bytes.
+    pub fn map_initialized(
+        &mut self,
+        base: GuestAddress,
+        size: usize,
+        permissions: MemoryPermissions,
+        initial_bytes: &[u8],
+    ) -> Result<(), AddressSpaceError> {
+        if initial_bytes.len() > size {
+            return Err(AddressSpaceError::Memory(MemoryError::OutOfBounds));
+        }
+        self.map(base, size, permissions)?;
+        let region = self
+            .regions
+            .iter_mut()
+            .find(|region| region.memory.base() == base)
+            .ok_or(AddressSpaceError::RegionNotFound)?;
+        if let Err(error) = region.memory.write_bytes(base, initial_bytes) {
+            self.regions.retain(|region| region.memory.base() != base);
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    pub fn read_bytes(
+        &self,
+        address: GuestAddress,
+        size: usize,
+    ) -> Result<&[u8], AddressSpaceError> {
+        let region = self.find_region(address)?;
+        if !region.permissions.read {
+            return Err(AddressSpaceError::PermissionDenied);
+        }
+        Ok(region.memory.read_bytes(address, size)?)
     }
 
     /// Changes permissions for the region whose base address matches exactly.
