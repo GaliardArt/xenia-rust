@@ -342,6 +342,22 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
+                    339 | 467 => {
+                        // mfspr/mtspr encode the two five-bit SPR halves in
+                        // reversed field order. Only architectural SPRs represented
+                        // by the current CPU state are accepted.
+                        let spr = ((instruction >> 16) & 0x1F)
+                            | (((instruction >> 11) & 0x1F) << 5);
+                        match (extended_opcode, spr) {
+                            (339, 1) => self.state.gpr[rt_rs] = self.state.xer as u32 as u64,
+                            (467, 1) => self.state.xer = self.state.gpr[rt_rs] as u32 as u64,
+                            (339, 8) => self.state.gpr[rt_rs] = self.state.lr,
+                            (467, 8) => self.state.lr = self.state.gpr[rt_rs],
+                            (339, 9) => self.state.gpr[rt_rs] = self.state.ctr,
+                            (467, 9) => self.state.ctr = self.state.gpr[rt_rs],
+                            _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                        }
+                    }
                     0 | 32 => {
                         let field = ((instruction >> 23) & 0x7) as usize;
                         let is_64_bit = instruction & (1 << 21) != 0;
@@ -1479,6 +1495,34 @@ mod tests {
         cpu.state.xer |= 1 << 29;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[8], !5_u64 + 1); // ~5 + 1
+    }
+
+    #[test]
+    fn move_to_and_from_supported_special_purpose_registers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // mfspr r5,LR; mtspr LR,r6; mfspr r7,XER
+        let encode_spr = |rt_rs: u32, spr: u32, xo: u32| {
+            let low = spr & 0x1F;
+            let high = (spr >> 5) & 0x1F;
+            (31 << 26) | (rt_rs << 21) | (low << 16) | (high << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode_spr(5, 8, 339));
+        put_instruction(&mut memory, 0x1004, encode_spr(6, 8, 467));
+        put_instruction(&mut memory, 0x1008, encode_spr(7, 1, 339));
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.lr = 0x1234_5678_9ABC_DEF0;
+        cpu.state.gpr[6] = 0xFEDC_BA98_7654_3210;
+        cpu.state.xer = 0xE000_0000;
+
+        for _ in 0..3 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[5], 0x1234_5678_9ABC_DEF0);
+        assert_eq!(cpu.state.lr, 0xFEDC_BA98_7654_3210);
+        assert_eq!(cpu.state.gpr[7], 0xE000_0000);
     }
 
     #[test]
