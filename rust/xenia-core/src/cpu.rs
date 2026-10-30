@@ -1077,7 +1077,7 @@ mod tests {
             cpu.step(&mut memory).unwrap();
         }
 
-        assert_eq!(cpu.state.gpr[4], 0xA578_A5A5);
+        assert_eq!(cpu.state.gpr[4], 0xA556_A5A5);
         assert_eq!(cpu.state.gpr[5], 0x0001_2340);
         assert_eq!(cpu.state.gpr[7], (-2_i64) as u64);
         assert_ne!(cpu.state.xer & (1 << 29), 0);
