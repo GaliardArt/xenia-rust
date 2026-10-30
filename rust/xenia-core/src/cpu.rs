@@ -2275,6 +2275,43 @@ mod tests {
     }
 
     #[test]
+    fn floating_point_invalid_arithmetic_sets_specific_fpscr_causes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // fdiv f1,f2,f3 (0/0); fsqrt f4,f5 (-1); fmul f6,f7,f8 (inf*0)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (4 << 21) | (5 << 11) | (22 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (63 << 26) | (6 << 21) | (7 << 16) | (8 << 6) | (25 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpr[5] = -1.0;
+        cpu.state.fpr[7] = f64::INFINITY;
+        cpu.state.fpr[8] = 0.0;
+
+        for _ in 0..3 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 20), 0); // VXIMZ
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+    }
+
+    #[test]
     fn floating_point_integer_conversion_obeys_fpscr_rounding_and_truncation() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // fctiw f1,f2; fctiwz f3,f2
