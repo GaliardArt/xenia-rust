@@ -129,6 +129,12 @@ impl PpcInterpreter {
         mask
     }
 
+    fn copy_fpscr_to_cr1(&mut self) {
+        // PowerPC record-form floating-point instructions copy FPSCR[0:3]
+        // (FX, FEX, VX, OX) into CR1; CR1 is not a sign/zero compare.
+        self.state.cr[1] = ((self.state.fpscr >> 28) & 0x0F) as u8;
+    }
+
     fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
         let field = bit_index / 4;
         let mask = 1 << (3 - (bit_index % 4));
@@ -1001,7 +1007,7 @@ impl PpcInterpreter {
                         } else {
                             Ordering::Equal
                         };
-                        self.set_cr_field(1, ordering);
+                        self.copy_fpscr_to_cr1();
                     }
                 }
                 self.state.pc = next_pc;
@@ -1712,6 +1718,27 @@ mod tests {
         assert_eq!(cpu.state.fpr[4], (3.75_f32) as f64);
         assert_eq!(cpu.state.fpr[5], 5.625);
         assert_eq!(cpu.state.cr[2], 0b0100);
+    }
+
+    #[test]
+    fn floating_point_record_form_copies_fpscr_summary_to_cr1() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadd. f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1) | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 2.0;
+        cpu.state.fpscr = 0xB000_0000;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 3.0);
+        assert_eq!(cpu.state.cr[1], 0x0B);
     }
 
     #[test]
