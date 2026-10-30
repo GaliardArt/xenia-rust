@@ -1903,7 +1903,6 @@ impl PpcInterpreter {
                                         | (if source_signaling_nan { 1 << 24 } else { 0 }),
                                     ..FpExceptionFlags::default()
                                 },
-                                single || xo10 == 12,
                                 record,
                             );
                             if conversion_invalid && self.state.fpscr & (1 << 7) != 0 {
@@ -1928,6 +1927,7 @@ impl PpcInterpreter {
                                     || (xo10 == 12
                                         && b.is_finite()
                                         && b.abs() > f32::MAX as f64),
+                                xo10 == 12,
                                 record,
                             );
                             if invalid_enabled {
