@@ -69,6 +69,7 @@ struct FpExceptionFlags {
     overflow: bool,
     underflow: bool,
     inexact: bool,
+    fraction_rounded: bool,
     invalid_cause: u32,
 }
 
@@ -181,6 +182,9 @@ impl PpcInterpreter {
         const FI: u32 = 1 << 17;
 
         self.state.fpscr &= !(FR | FI);
+        if exceptions.fraction_rounded {
+            self.state.fpscr |= FR;
+        }
         if exceptions.inexact {
             self.state.fpscr |= FI;
         }
@@ -245,6 +249,7 @@ impl PpcInterpreter {
         operands: &[f64],
         operation: u32,
         inexact: bool,
+        fraction_rounded: bool,
         record: bool,
     ) {
         let has_nan_operand = operands.iter().any(|operand| operand.is_nan());
@@ -306,6 +311,7 @@ impl PpcInterpreter {
                 overflow,
                 underflow,
                 inexact: inexact || overflow,
+                fraction_rounded,
                 invalid_cause,
             },
             record,
@@ -345,7 +351,7 @@ impl PpcInterpreter {
     fn round_to_single(&self, value: f64) -> f64 {
         let nearest = value as f32;
         let nearest_as_double = nearest as f64;
-        if !value.is_finite() || nearest_as_double == value {
+        if value.is_nan() || value.is_infinite() || nearest_as_double == value {
             return nearest_as_double;
         }
         let adjusted = match self.fpscr_rounding_mode() {
@@ -1432,6 +1438,7 @@ impl PpcInterpreter {
                             operands,
                             xo5,
                             rounded != value,
+                            rounded.abs() > value.abs(),
                             record,
                         );
                     }
@@ -1463,7 +1470,14 @@ impl PpcInterpreter {
                                 record,
                             );
                         } else {
-                            self.update_fpscr_for_result(value, operands, xo5, inexact, record);
+                            self.update_fpscr_for_result(
+                                value,
+                                operands,
+                                xo5,
+                                inexact,
+                                inexact && value.abs() > b.abs(),
+                                record,
+                            );
                         }
                     } else if record {
                         self.copy_fpscr_to_cr1();
