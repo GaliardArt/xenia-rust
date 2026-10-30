@@ -349,11 +349,16 @@ impl PpcInterpreter {
         // ZX is specific to division/reciprocal operations. A zero
         // second operand in add, subtract, multiply, or fused operations is
         // ordinary arithmetic and must not raise divide-by-zero.
-        let div_zero = matches!(operation, 18 | 24 | 26)
-            && operands.len() >= 2
-            && operands[1] == 0.0
-            && operands[0] != 0.0
-            && operands[0].is_finite();
+        let div_zero = match operation {
+            18 => {
+                operands.len() >= 2
+                    && operands[1] == 0.0
+                    && operands[0] != 0.0
+                    && operands[0].is_finite()
+            }
+            24 | 26 => operands.first().is_some_and(|operand| *operand == 0.0),
+            _ => false,
+        };
         let overflow = !div_zero
             && operands.iter().all(|operand| operand.is_finite())
             && (overflow || value.is_infinite());
@@ -2049,11 +2054,16 @@ impl PpcInterpreter {
                 if arithmetic && single {
                     // Single-precision arithmetic rounds the stored result,
                     // not the source operands, to IEEE-754 binary32.
-                    let divide_by_zero = matches!(xo5, 18 | 24 | 26)
-                        && operands.len() >= 2
-                        && operands[1] == 0.0
-                        && operands[0] != 0.0
-                        && operands[0].is_finite();
+                    let divide_by_zero = match xo5 {
+                        18 => {
+                            operands.len() >= 2
+                                && operands[1] == 0.0
+                                && operands[0] != 0.0
+                                && operands[0].is_finite()
+                        }
+                        24 | 26 => operands.first().is_some_and(|operand| *operand == 0.0),
+                        _ => false,
+                    };
                     let overflow = !divide_by_zero
                         && operands.iter().all(|operand| operand.is_finite())
                         && (value.is_infinite()
@@ -3124,10 +3134,10 @@ mod tests {
         put_instruction(
             &mut memory,
             0x1000,
-            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
         );
         cpu.state.pc = 0x1000;
-        cpu.state.fpscr = 0xB000_0000;
+        cpu.state.fpscr = 0xB000_0000 | (1 << 9); // retain VX summary through VXSQRT
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[1], 0x0B);
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
@@ -3220,7 +3230,7 @@ mod tests {
             cpu.step(&mut memory).unwrap();
         }
 
-        assert_eq!(cpu.state.cr[3], 0xA);
+        assert_eq!(cpu.state.cr[3], 0x8); // FX and OX; VX summary is derived, not writable
         assert_eq!(cpu.state.cr[4], 0x5);
         assert_eq!(cpu.state.fpscr & 0xF000_0000, 0);
         assert_eq!(cpu.state.fpscr & 0xF, 0x5);
@@ -3389,13 +3399,14 @@ mod tests {
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 10.0;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 4; // ZE enable
 
         cpu.step(&mut memory).unwrap();
 
-        assert!(cpu.state.fpr[1].is_infinite());
+        assert_eq!(cpu.state.fpr[1], 10.0); // enabled exception suppresses destination write
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
@@ -3431,7 +3442,7 @@ mod tests {
         );
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
-        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_1000); // quiet NaN
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_1000); // unordered FPCC; C remains clear
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[3], 0b0001);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0);
@@ -3489,7 +3500,7 @@ mod tests {
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: overflow rounded away from zero
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // FR is undefined on disabled overflow; model as zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -f64::MAX;
@@ -3828,7 +3839,7 @@ mod tests {
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // FR is undefined on disabled overflow; model as zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -f64::MAX;
