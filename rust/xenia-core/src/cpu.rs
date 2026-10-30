@@ -1330,6 +1330,7 @@ impl PpcInterpreter {
 
                 let mut arithmetic = false;
                 let mut update_status = false;
+                let mut conversion_invalid = false;
                 let value = match xo10 {
                     264 => b.abs(),  // fabs
                     72 => b,         // fmr
@@ -1353,6 +1354,7 @@ impl PpcInterpreter {
                         };
                         update_status = true;
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
+                            conversion_invalid = true;
                             self.state.fpscr |= 1 << 8; // VXCVI
                             self.update_fpscr_exceptions(
                                 FpExceptionFlags {
@@ -1447,7 +1449,11 @@ impl PpcInterpreter {
                                 _ => &[a, b],
                             },
                         };
-                        let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
+                        let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815)
+                            && !conversion_invalid
+                            && value.is_finite()
+                            && b.is_finite()
+                            && value != b;
                         if matches!(xo10, 14 | 15 | 814 | 815) {
                             self.update_fpscr_exceptions(
                                 FpExceptionFlags {
