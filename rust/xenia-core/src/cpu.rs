@@ -998,15 +998,6 @@ impl PpcInterpreter {
                     let stored = if single { (value as f32) as f64 } else { value };
                     self.state.fpr[frt] = stored;
                     if record {
-                        let ordering = if stored.is_nan() {
-                            Ordering::Equal
-                        } else if stored < 0.0 {
-                            Ordering::Less
-                        } else if stored > 0.0 {
-                            Ordering::Greater
-                        } else {
-                            Ordering::Equal
-                        };
                         self.copy_fpscr_to_cr1();
                     }
                 }
