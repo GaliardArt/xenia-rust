@@ -45,10 +45,18 @@ impl fmt::Display for SecurityInfoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::OffsetOutOfBounds => f.write_str("XEX security-info offset is outside the file"),
-            Self::TruncatedFixedHeader => f.write_str("XEX2 security-info fixed header is truncated"),
-            Self::DescriptorTableOverflow => f.write_str("XEX page-descriptor table size overflows"),
-            Self::DescriptorTableOutOfBounds => f.write_str("XEX page-descriptor table exceeds file bounds"),
-            Self::InvalidSectionType => f.write_str("XEX page descriptor has an unknown section type"),
+            Self::TruncatedFixedHeader => {
+                f.write_str("XEX2 security-info fixed header is truncated")
+            }
+            Self::DescriptorTableOverflow => {
+                f.write_str("XEX page-descriptor table size overflows")
+            }
+            Self::DescriptorTableOutOfBounds => {
+                f.write_str("XEX page-descriptor table exceeds file bounds")
+            }
+            Self::InvalidSectionType => {
+                f.write_str("XEX page descriptor has an unknown section type")
+            }
             Self::InvalidImageSize => f.write_str("XEX image size is zero"),
         }
     }
@@ -76,9 +84,8 @@ pub fn parse_xex2_security_info(
     let image_flags = read_u32_be(fixed, 0x10C);
     let load_address = read_u32_be(fixed, 0x110);
     let import_table_count = read_u32_be(fixed, 0x128);
-    let aes_key = fixed[0x150..0x160]
-        .try_into()
-        .expect("fixed-size AES key slice");
+    let mut aes_key = [0; 16];
+    aes_key.copy_from_slice(&fixed[0x150..0x160]);
     let export_table = read_u32_be(fixed, 0x160);
     let region = read_u32_be(fixed, 0x178);
     let allowed_media_types = read_u32_be(fixed, 0x17C);
@@ -105,9 +112,8 @@ pub fn parse_xex2_security_info(
         if !(1..=3).contains(&section_type) {
             return Err(SecurityInfoError::InvalidSectionType);
         }
-        let digest = descriptor[4..24]
-            .try_into()
-            .expect("fixed-size page digest slice");
+        let mut digest = [0; 20];
+        digest.copy_from_slice(&descriptor[4..24]);
         page_descriptors.push(XexPageDescriptor {
             section_type,
             page_count: encoded & 0x0FFF_FFFF,
