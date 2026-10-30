@@ -729,16 +729,24 @@ impl PpcInterpreter {
                 if update && (ra == 0 || ra == rt_rs) {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
                 }
-                let address = (if ra == 0 { 0 } else { self.state.gpr[ra] as u32 })
-                    .wrapping_add(immediate as u32);
+                let address = (if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                })
+                .wrapping_add(immediate as u32);
                 let value = match opcode {
                     48 | 49 => {
                         f32::from_bits(
-                            memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?,
+                            memory
+                                .read_u32_be(GuestAddress(address))
+                                .map_err(Into::into)?,
                         ) as f64
                     }
                     50 | 51 => {
-                        let high = memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?;
+                        let high = memory
+                            .read_u32_be(GuestAddress(address))
+                            .map_err(Into::into)?;
                         let low = memory
                             .read_u32_be(GuestAddress(address.wrapping_add(4)))
                             .map_err(Into::into)?;
@@ -762,7 +770,10 @@ impl PpcInterpreter {
                 let bits = self.state.fpr[rt_rs].to_bits();
                 if matches!(opcode, 52 | 53) {
                     memory
-                        .write_u32_be(GuestAddress(address), (self.state.fpr[rt_rs] as f32).to_bits())
+                        .write_u32_be(
+                            GuestAddress(address),
+                            (self.state.fpr[rt_rs] as f32).to_bits(),
+                        )
                         .map_err(Into::into)?;
                 } else {
                     memory
