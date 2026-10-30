@@ -1468,6 +1468,35 @@ mod tests {
     }
 
     #[test]
+    fn floating_point_single_and_double_memory_operations_round_trip() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 64);
+        // lfs f1,0(r3); stfd f2,8(r3); lfd f3,8(r3); stfs f3,16(r3)
+        put_instruction(&mut memory, 0x1000, (48 << 26) | (1 << 21) | (3 << 16));
+        put_instruction(&mut memory, 0x1004, (54 << 26) | (2 << 21) | (3 << 16) | 8);
+        put_instruction(&mut memory, 0x1008, (50 << 26) | (3 << 21) | (3 << 16) | 8);
+        put_instruction(&mut memory, 0x100C, (52 << 26) | (3 << 21) | (3 << 16) | 16);
+        memory
+            .write_u32_be(GuestAddress(0x1010), 1.5_f32.to_bits())
+            .unwrap();
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1010;
+        cpu.state.fpr[2] = 2.25;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.fpr[1], 1.5);
+        assert_eq!(cpu.state.fpr[3], 2.25);
+        assert_eq!(
+            memory.read_u32_be(GuestAddress(0x1020)),
+            Ok(2.25_f32.to_bits())
+        );
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
