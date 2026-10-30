@@ -1867,19 +1867,20 @@ impl PpcInterpreter {
                     // Compare instructions update FPCC only; the FPRF
                     // class bit C is preserved for all comparison results.
                     self.set_fprf_condition(fprf_condition);
+                    let mut invalid_cause = 0;
                     if signaling_nan {
-                        self.state.fpscr |= 1 << 24; // VXSNAN
+                        invalid_cause |= 1 << 24; // VXSNAN
                     }
                     if unordered
                         && xo10 == 32
                         && (!signaling_nan || self.state.fpscr & (1 << 7) == 0)
                     {
-                        self.state.fpscr |= 1 << 19; // VXVC
+                        invalid_cause |= 1 << 19; // VXVC
                     }
                     self.update_fpscr_exceptions(
                         FpExceptionFlags {
                             invalid,
-                            invalid_cause: 0,
+                            invalid_cause,
                             ..FpExceptionFlags::default()
                         },
                         false,
