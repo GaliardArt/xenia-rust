@@ -881,6 +881,9 @@ impl PpcInterpreter {
         M: GuestMemoryAccess,
         M::Error: Into<PpcError>,
     {
+        // The event belongs to exactly one instruction. A caller should
+        // inspect/consume it after each successful step, before stepping again.
+        self.pending_exception = None;
         let pc = self.state.pc;
         let instruction = memory.fetch_u32_be(GuestAddress(pc)).map_err(Into::into)?;
         let opcode = instruction >> 26;
