@@ -112,13 +112,13 @@ impl PpcInterpreter {
             }
             // mulli RT,RA,SI — multiply by a sign-extended immediate.
             7 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                let base = self.state.gpr[ra];
                 self.state.gpr[rt_rs] = (base as i64).wrapping_mul(immediate) as u64;
                 self.state.pc = next_pc;
             }
             // subfic RT,RA,SI — subtract RA from the sign-extended immediate.
             8 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                let base = self.state.gpr[ra];
                 let minuend = immediate as u64;
                 let (value, borrow) = minuend.overflowing_sub(base);
                 self.state.gpr[rt_rs] = value;
@@ -127,7 +127,7 @@ impl PpcInterpreter {
             }
             // addic/addic. RT,RA,SI — add immediate and set carry.
             12 | 13 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                let base = self.state.gpr[ra];
                 let (value, carry) = base.overflowing_add(immediate as u64);
                 self.state.gpr[rt_rs] = value;
                 self.state.xer = (self.state.xer & !(1 << 29)) | ((carry as u64) << 29);
