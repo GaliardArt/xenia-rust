@@ -2085,6 +2085,35 @@ mod tests {
         assert_eq!(cpu.state.fpr[4], (3.75_f32) as f64);
         assert_eq!(cpu.state.fpr[5], 5.625);
         assert_eq!(cpu.state.cr[2], 0b0100);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF: greater
+    }
+
+    #[test]
+    fn floating_point_select_updates_fprf_without_raising_exceptions() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fsel. f1,f2,f3,f4
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26)
+                | (1 << 21)
+                | (2 << 16)
+                | (3 << 11)
+                | (4 << 6)
+                | (23 << 1)
+                | 1,
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::NAN;
+        cpu.state.fpr[3] = -0.0;
+        cpu.state.fpr[4] = 3.0;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
+        assert_eq!(cpu.state.fpscr & 0xE000_0000, 0); // no FX/FEX/VX
     }
 
     #[test]
@@ -2197,6 +2226,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_1000); // quiet NaN
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[3], 0b0001);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0);
