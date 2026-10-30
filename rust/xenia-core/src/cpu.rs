@@ -77,12 +77,31 @@ struct FpExceptionFlags {
     invalid_cause: u32,
 }
 
+/// A guest-visible floating-point exception raised by the last instruction.
+/// The CPU/exception-dispatch layer consumes this event and performs the
+/// platform-specific program-exception entry sequence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PpcException {
+    FloatingPoint { pc: u32, causes: u32 },
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PpcInterpreter {
     pub state: PpcState,
+    pending_exception: Option<PpcException>,
 }
 
 impl PpcInterpreter {
+    /// Removes the pending guest exception so the outer CPU can dispatch it.
+    pub fn take_pending_exception(&mut self) -> Option<PpcException> {
+        self.pending_exception.take()
+    }
+
+    /// Returns the pending guest exception without consuming it.
+    pub fn pending_exception(&self) -> Option<PpcException> {
+        self.pending_exception
+    }
+
     fn branch_condition(&mut self, bo: u8, bi: usize) -> bool {
         let ignore_cr = bo & 0x10 != 0;
         let expected_cr = bo & 0x08 != 0;
@@ -222,6 +241,33 @@ impl PpcInterpreter {
             self.state.fpscr |= FX;
         }
         self.state.fpscr |= raised;
+
+        // FPSCR enable bits request a guest exception for this instruction.
+        // Do not infer this solely from sticky FEX: the same cause may have
+        // been recorded by an earlier instruction.
+        let mut enabled_causes = 0;
+        if exceptions.invalid && self.state.fpscr & (1 << 7) != 0 {
+            enabled_causes |= VX | exceptions.invalid_cause;
+        }
+        if exceptions.div_zero && self.state.fpscr & (1 << 4) != 0 {
+            enabled_causes |= ZX;
+        }
+        if exceptions.overflow && self.state.fpscr & (1 << 6) != 0 {
+            enabled_causes |= OX;
+        }
+        if exceptions.underflow && self.state.fpscr & (1 << 5) != 0 {
+            enabled_causes |= UX;
+        }
+        if exceptions.raise_inexact && self.state.fpscr & (1 << 3) != 0 {
+            enabled_causes |= XX;
+        }
+        if enabled_causes != 0 && self.pending_exception.is_none() {
+            self.pending_exception = Some(PpcException::FloatingPoint {
+                pc: self.state.pc,
+                causes: enabled_causes,
+            });
+        }
+
         self.refresh_fpscr_fex();
         if record {
             self.copy_fpscr_to_cr1();
@@ -4558,4 +4604,50 @@ mod tests {
         assert_eq!(cpu.state.fpscr & (1 << 27), 0); // exact subnormal: no UX
         assert_eq!(cpu.state.fpscr & (1 << 30), 0); // no enabled exception summary
     }
+    #[test]
+    fn enabled_floating_point_invalid_exception_is_reported_to_cpu_layer() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+
+        cpu.step(&mut memory).unwrap();
+
+        let expected = PpcException::FloatingPoint {
+            pc: 0x1000,
+            causes: (1 << 29) | (1 << 21), // VX | VXZDZ
+        };
+        assert_eq!(cpu.pending_exception(), Some(expected));
+        assert_eq!(cpu.take_pending_exception(), Some(expected));
+        assert_eq!(cpu.take_pending_exception(), None);
+    }
+
+    #[test]
+    fn disabled_floating_point_invalid_exception_does_not_notify_cpu_layer() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.pending_exception(), None);
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // sticky VX still records
+    }
+
 }
