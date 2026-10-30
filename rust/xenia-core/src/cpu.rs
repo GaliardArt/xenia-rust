@@ -3566,6 +3566,52 @@ mod tests {
     }
 
     #[test]
+    fn non_ieee_mode_flushes_single_denormal_results_to_signed_zero() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -(f32::from_bits(1) as f64);
+        cpu.state.fpr[3] = -0.0;
+        cpu.state.fpscr = 1 << 2; // NI
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
+    }
+
+    #[test]
+    fn non_ieee_mode_flushes_double_denormal_results_to_signed_zero() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fmul f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 6) | (25 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits(1);
+        cpu.state.fpr[3] = -1.0;
+        cpu.state.fpscr = 1 << 2; // NI
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
+    }
+
+    #[test]
     fn enabled_single_overflow_adjusts_exponent_and_reports_normal_fprf() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // fadds f1,f2,f3
@@ -3603,7 +3649,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = 1 << 5; // UE
+        cpu.state.fpscr = (1 << 5) | (1 << 2); // UE + NI: enabled underflow keeps adjusted result
 
         cpu.step(&mut memory).unwrap();
 
