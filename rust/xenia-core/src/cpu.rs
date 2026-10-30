@@ -72,7 +72,7 @@ struct FpExceptionFlags {
     raise_inexact: bool,
     fraction_rounded: bool,
     /// Whether this instruction updates FPSCR[FR:FI]. Comparisons and
-    /// exception-only operations must preserve the previous rounding status.
+    /// non-rounding estimate operations preserve the previous status.
     update_rounding: bool,
     invalid_cause: u32,
 }
