@@ -945,12 +945,12 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                for register in rt_rs..32 {
+                for (register, value) in self.state.gpr.iter().enumerate().skip(rt_rs) {
                     let offset = ((register - rt_rs) as u32).wrapping_mul(4);
                     memory
                         .write_u32_be(
                             GuestAddress(address.wrapping_add(offset)),
-                            self.state.gpr[register] as u32,
+                            *value as u32,
                         )
                         .map_err(Into::into)?;
                 }
@@ -1689,8 +1689,8 @@ mod tests {
         cpu.state.gpr[3] = 0x1020;
 
         cpu.step(&mut memory).unwrap();
-        for register in 28..32 {
-            assert_eq!(cpu.state.gpr[register], 0xA000_0000 | register as u64);
+        for (register, value) in cpu.state.gpr.iter().enumerate().skip(28) {
+            assert_eq!(*value, 0xA000_0000 | register as u64);
         }
         cpu.state.gpr[30] = 0x1122_3344;
         cpu.state.gpr[31] = 0x5566_7788;
