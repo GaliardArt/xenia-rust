@@ -634,6 +634,59 @@ impl PpcInterpreter {
         (adjusted, true, fraction_rounded, false)
     }
 
+    fn round_double_overflow_enabled(
+        &self,
+        operation: u32,
+        a: f64,
+        b: f64,
+        c: f64,
+    ) -> (f64, bool, bool) {
+        let (scaled_a, scaled_b, scaled_c, intermediate) = match operation {
+            21 => {
+                let sa = Self::scale_by_power_of_two(a, -1536);
+                let sb = Self::scale_by_power_of_two(b, -1536);
+                (sa, sb, c, sa + sb)
+            }
+            20 => {
+                let sa = Self::scale_by_power_of_two(a, -1536);
+                let sb = Self::scale_by_power_of_two(b, -1536);
+                (sa, sb, c, sa - sb)
+            }
+            18 => {
+                let exponent = b.abs().log2().floor() as i32;
+                if exponent <= -513 {
+                    let sb = Self::scale_by_power_of_two(b, 1536);
+                    (a, sb, c, a / sb)
+                } else {
+                    let sa = Self::scale_by_power_of_two(a, -1536);
+                    (sa, b, c, sa / b)
+                }
+            }
+            25 => {
+                let sa = Self::scale_by_power_of_two(a, -768);
+                let sc = Self::scale_by_power_of_two(c, -768);
+                (sa, b, sc, sa * sc)
+            }
+            28..=31 => {
+                let sa = Self::scale_by_power_of_two(a, -768);
+                let sb = Self::scale_by_power_of_two(b, -1536);
+                let sc = Self::scale_by_power_of_two(c, -768);
+                let result = match operation {
+                    29 => sa.mul_add(sc, sb),
+                    28 => sa.mul_add(sc, -sb),
+                    31 => -sa.mul_add(sc, sb),
+                    30 => -sa.mul_add(sc, -sb),
+                    _ => unreachable!(),
+                };
+                (sa, sb, sc, result)
+            }
+            _ => return (f64::NAN, false, false),
+        };
+        let rounded =
+            self.round_binary64_result(operation, scaled_a, scaled_b, scaled_c, intermediate);
+        (rounded.0, rounded.1, rounded.2)
+    }
+
     fn fpscr_rounding_mode(&self) -> u32 {
         self.state.fpscr & 0b11
     }
@@ -1860,6 +1913,13 @@ impl PpcInterpreter {
                     double_inexact = rounded.1;
                     double_fraction_rounded = rounded.2;
                     double_overflow = rounded.3;
+                    if double_overflow && self.state.fpscr & (1 << 6) != 0 {
+                        let adjusted =
+                            self.round_double_overflow_enabled(xo5, a, b, c);
+                        value = adjusted.0;
+                        double_inexact = adjusted.1;
+                        double_fraction_rounded = adjusted.2;
+                    }
                 }
 
                 if xo5 == 23 && !update_status {
