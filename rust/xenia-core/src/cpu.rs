@@ -2205,10 +2205,9 @@ impl PpcInterpreter {
                                 xo10 == 12,
                                 record,
                             );
-                            let reciprocal_zero_divide_enabled =
-                                matches!(xo5, 24 | 26)
-                                    && b == 0.0
-                                    && self.state.fpscr & (1 << 4) != 0;
+                            let reciprocal_zero_divide_enabled = matches!(xo5, 24 | 26)
+                                && b == 0.0
+                                && self.state.fpscr & (1 << 4) != 0;
                             if invalid_enabled || reciprocal_zero_divide_enabled {
                                 self.state.fpr[frt] = previous_fpr;
                             }
