@@ -2100,7 +2100,7 @@ impl PpcInterpreter {
                     // mffs
                     // Xenia's Xenon execution model zero-extends the
                     // 32-bit FPSCR payload into the 64-bit FPR container.
-                    self.state.fpr[frt] = self.state.fpscr as f64;
+                    self.state.fpr[frt] = f64::from_bits(self.state.fpscr as u64);
                     if record {
                         self.copy_fpscr_to_cr1();
                     }
