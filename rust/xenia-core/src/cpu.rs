@@ -304,7 +304,7 @@ impl PpcInterpreter {
                             40 | 8 | 136 => {
                                 let borrow_in = if xo == 136 && self.state.xer & (1 << 29) != 0 { 0_u64 } else { 1_u64 };
                                 let (partial, b1) = right.overflowing_sub(left);
-                                let (value, b2) = partial.overflowing_sub(borrow_in - 1);
+                                let (value, b2) = partial.overflowing_sub(borrow_in);
                                 let overflow = (((right ^ left) & (right ^ value)) >> 63) != 0;
                                 (value, !(b1 || b2), overflow)
                             }
@@ -312,7 +312,7 @@ impl PpcInterpreter {
                         };
                         self.state.gpr[rt_rs] = value;
                         if oe { self.update_overflow(overflow); }
-                        else if xo == 10 || xo == 8 || xo == 138 || xo == 136 { self.set_carry(carry); }
+                        if xo == 10 || xo == 8 || xo == 138 || xo == 136 { self.set_carry(carry); }
                         if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
                     }
                     104 | 616 => {
@@ -339,7 +339,7 @@ impl PpcInterpreter {
                         self.state.gpr[rt_rs] = value;
                         if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
                     }
-                    459 | 491 => {
+                    459 | 491 | 971 | 1003 => {
                         let dividend = self.state.gpr[ra] as u32;
                         let divisor = self.state.gpr[rb] as u32;
                         let signed = xo == 491;
@@ -673,6 +673,39 @@ mod tests {
 
         assert_eq!(cpu.state.gpr[5], 19);
         assert_eq!(cpu.state.gpr[6], 5);
+    }
+
+    #[test]
+    fn addc_and_subfc_update_carry_and_record_result() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // addc r5,r3,r4
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (5 << 21) | (3 << 16) | (4 << 11) | (10 << 1));
+        // subfc r6,r3,r4 => r4-r3
+        put_instruction(&mut memory, 0x1004, (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (8 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = u64::MAX;
+        cpu.state.gpr[4] = 1;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[5], 0);
+        assert_ne!(cpu.state.xer & (1 << 29), 0);
+        cpu.state.gpr[3] = 1;
+        cpu.state.gpr[4] = 5;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[6], 4);
+        assert_ne!(cpu.state.xer & (1 << 29), 0);
+    }
+
+    #[test]
+    fn condition_register_logic_updates_individual_bits() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // crand bt=3, ba=2, bb=1
+        put_instruction(&mut memory, 0x1000, (19 << 26) | (3 << 21) | (2 << 16) | (1 << 11) | (257 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.cr[0] = 0b1100;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[0] & 0b0001, 0b0001);
     }
 
     #[test]
