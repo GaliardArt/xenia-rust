@@ -929,9 +929,9 @@ impl PpcInterpreter {
                 };
                 let address = base.wrapping_add(immediate as u32);
                 let mut loaded = [0_u64; 32];
-                for register in rt_rs..32 {
+                for (register, value) in loaded.iter_mut().enumerate().skip(rt_rs) {
                     let offset = ((register - rt_rs) as u32).wrapping_mul(4);
-                    loaded[register] = memory
+                    *value = memory
                         .read_u32_be(GuestAddress(address.wrapping_add(offset)))
                         .map_err(Into::into)? as u64;
                 }
