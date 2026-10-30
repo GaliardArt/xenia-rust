@@ -1441,6 +1441,8 @@ impl PpcInterpreter {
                             rounded.abs() > value.abs(),
                             record,
                         );
+                    } else if record {
+                        self.copy_fpscr_to_cr1();
                     }
                 } else {
                     self.state.fpr[frt] = value;
@@ -2250,6 +2252,18 @@ mod tests {
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
         assert_eq!(cpu.state.fpscr & 0xE000_0000, 0); // no FX/FEX/VX
+
+        // The single-precision fsel. form also copies FPSCR[0:3] to CR1.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
+        );
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0xB000_0000;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[1], 0x0B);
+        assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
     }
 
     #[test]
