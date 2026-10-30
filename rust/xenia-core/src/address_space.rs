@@ -259,6 +259,27 @@ impl GuestAddressSpace {
         Ok(())
     }
 
+    pub fn read_u64_be(&self, address: GuestAddress) -> Result<u64, AddressSpaceError> {
+        let region = self.find_region(address)?;
+        if !region.permissions.read {
+            return Err(AddressSpaceError::PermissionDenied);
+        }
+        Ok(region.memory.read_u64_be(address)?)
+    }
+
+    pub fn write_u64_be(
+        &mut self,
+        address: GuestAddress,
+        value: u64,
+    ) -> Result<(), AddressSpaceError> {
+        let region = self.find_region_mut(address)?;
+        if !region.permissions.write {
+            return Err(AddressSpaceError::PermissionDenied);
+        }
+        region.memory.write_u64_be(address, value)?;
+        Ok(())
+    }
+
     fn find_region(&self, address: GuestAddress) -> Result<&Region, AddressSpaceError> {
         self.regions
             .iter()
@@ -303,6 +324,14 @@ impl crate::memory::GuestMemoryAccess for GuestAddressSpace {
             return Err(AddressSpaceError::PermissionDenied);
         }
         Ok(region.memory.read_u32_be(address)?)
+    }
+
+    fn read_u64_be(&self, address: GuestAddress) -> Result<u64, Self::Error> {
+        GuestAddressSpace::read_u64_be(self, address)
+    }
+
+    fn write_u64_be(&mut self, address: GuestAddress, value: u64) -> Result<(), Self::Error> {
+        GuestAddressSpace::write_u64_be(self, address, value)
     }
 
     fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
