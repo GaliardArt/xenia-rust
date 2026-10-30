@@ -1629,7 +1629,8 @@ impl PpcInterpreter {
                     memory
                         .write_u32_be(
                             GuestAddress(address as u32),
-                            self.narrow_single_for_store(self.state.fpr[rt_rs]).to_bits(),
+                            self.narrow_single_for_store(self.state.fpr[rt_rs])
+                                .to_bits(),
                         )
                         .map_err(Into::into)?;
                 } else {
