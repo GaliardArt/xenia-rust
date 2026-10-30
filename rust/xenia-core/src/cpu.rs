@@ -3536,6 +3536,90 @@ mod tests {
     }
 
     #[test]
+    fn enabled_single_overflow_adjusts_exponent_and_reports_normal_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f32::MAX as f64;
+        cpu.state.fpr[3] = f32::MAX as f64;
+        cpu.state.fpscr = 1 << 6; // OE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert!(cpu.state.fpr[1].is_finite());
+        assert!(cpu.state.fpr[1] > 0.0);
+        assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+    }
+
+    #[test]
+    fn enabled_single_underflow_adjusts_exponent_and_reports_normal_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadds f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f32::from_bits(1) as f64;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 5; // UE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], 2.0_f64.powi(43));
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+    }
+
+    #[test]
+    fn enabled_double_overflow_and_underflow_adjust_exponents() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fadd f1,f2,f3; fmul f4,f5,f6
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (4 << 21) | (5 << 16) | (6 << 6) | (25 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::MAX;
+        cpu.state.fpr[3] = f64::MAX;
+        cpu.state.fpr[5] = f64::from_bits(1);
+        cpu.state.fpr[6] = 1.0;
+        cpu.state.fpscr = 1 << 6; // OE
+
+        cpu.step(&mut memory).unwrap();
+        assert!(cpu.state.fpr[1].is_finite());
+        assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+
+        cpu.state.pc = 0x1004;
+        cpu.state.fpscr = 1 << 5; // UE
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[4], 2.0_f64.powi(462));
+        assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+    }
+
+    #[test]
     fn double_precision_underflow_updates_fpscr_and_obeys_directed_rounding() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // fdiv f1,f2,f3
