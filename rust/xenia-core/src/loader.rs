@@ -247,7 +247,15 @@ pub fn load_xex2_image(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadError> {
         if payload.len() < security.image_size as usize {
             return Err(XexLoadError::ImageSmallerThanDeclared);
         }
-        payload.to_vec()
+        if payload.len() > MAX_IMAGE_SIZE {
+            return Err(XexLoadError::ImageTooLarge);
+        }
+        let mut image = Vec::new();
+        image
+            .try_reserve_exact(payload.len())
+            .map_err(|_| XexLoadError::AllocationFailed)?;
+        image.extend_from_slice(payload);
+        image
     } else {
         decode_basic_compression(payload, file_format, &security)?
     };
