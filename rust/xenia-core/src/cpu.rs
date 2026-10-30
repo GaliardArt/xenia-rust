@@ -1356,12 +1356,12 @@ impl PpcInterpreter {
                         let spr =
                             (((instruction >> 11) & 0x1F) << 5) | ((instruction >> 16) & 0x1F);
                         match (extended_opcode, spr) {
-                            (339, 1) => self.state.gpr[rt_rs] = self.state.xer,
+                            (339, 1) => self.state.gpr[rt_rs] = self.state.xer as u32 as u64,
                             (339, 8) => self.state.gpr[rt_rs] = self.state.lr,
                             (339, 9) => self.state.gpr[rt_rs] = self.state.ctr,
                             (339, 26) => self.state.gpr[rt_rs] = self.state.srr0,
                             (339, 27) => self.state.gpr[rt_rs] = self.state.srr1,
-                            (467, 1) => self.state.xer = self.state.gpr[rt_rs],
+                            (467, 1) => self.state.xer = self.state.gpr[rt_rs] as u32 as u64,
                             (467, 8) => self.state.lr = self.state.gpr[rt_rs],
                             (467, 9) => self.state.ctr = self.state.gpr[rt_rs],
                             (467, 26) => self.state.srr0 = self.state.gpr[rt_rs],
@@ -1464,22 +1464,6 @@ impl PpcInterpreter {
                                     .map_err(Into::into)?;
                             }
                             _ => unreachable!(),
-                        }
-                    }
-                    339 | 467 => {
-                        // mfspr/mtspr encode the two five-bit SPR halves in
-                        // reversed field order. Only architectural SPRs represented
-                        // by the current CPU state are accepted.
-                        let spr =
-                            ((instruction >> 16) & 0x1F) | (((instruction >> 11) & 0x1F) << 5);
-                        match (extended_opcode, spr) {
-                            (339, 1) => self.state.gpr[rt_rs] = self.state.xer as u32 as u64,
-                            (467, 1) => self.state.xer = self.state.gpr[rt_rs] as u32 as u64,
-                            (339, 8) => self.state.gpr[rt_rs] = self.state.lr,
-                            (467, 8) => self.state.lr = self.state.gpr[rt_rs],
-                            (339, 9) => self.state.gpr[rt_rs] = self.state.ctr,
-                            (467, 9) => self.state.ctr = self.state.gpr[rt_rs],
-                            _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                         }
                     }
                     0 | 32 => {
@@ -5207,7 +5191,7 @@ mod tests {
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
-        cpu.state.gpr[3] = (PPC_MSR_FE0 | PPC_MSR_FE1) as u64;
+        cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
 
         assert_eq!(
             cpu.step(&mut memory),
@@ -5281,7 +5265,7 @@ mod tests {
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
-        cpu.state.gpr[3] = PPC_MSR_FE1 as u64;
+        cpu.state.gpr[3] = PPC_MSR_FE1;
         cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // ZX + ZE => FEX
 
         cpu.step(&mut memory).unwrap();
@@ -5308,7 +5292,7 @@ mod tests {
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.msr = PPC_MSR_FE0;
-        cpu.state.gpr[3] = PPC_MSR_FE0 as u64;
+        cpu.state.gpr[3] = PPC_MSR_FE0;
         cpu.state.fpscr = (1 << 30) | (1 << 29) | (1 << 24) | (1 << 7);
 
         cpu.step(&mut memory).unwrap();
@@ -5440,7 +5424,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        put_instruction(&mut memory, 0x1004, (14 << 26));
+        put_instruction(&mut memory, 0x1004, 14 << 26);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
