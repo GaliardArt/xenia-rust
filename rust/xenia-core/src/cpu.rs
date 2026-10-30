@@ -135,6 +135,68 @@ impl PpcInterpreter {
         self.state.cr[1] = ((self.state.fpscr >> 28) & 0x0F) as u8;
     }
 
+    fn update_fpscr_exceptions(&mut self, invalid: bool, div_zero: bool, overflow: bool, underflow: bool, inexact: bool, record: bool) {
+        const FX: u32 = 1 << 31;
+        const FEX: u32 = 1 << 30;
+        const VX: u32 = 1 << 29;
+        const OX: u32 = 1 << 28;
+        const UX: u32 = 1 << 27;
+        const ZX: u32 = 1 << 26;
+        const XX: u32 = 1 << 25;
+        const VE: u32 = 1 << 7;
+        const OE: u32 = 1 << 6;
+        const UE: u32 = 1 << 5;
+        const ZE: u32 = 1 << 4;
+        const XE: u32 = 1 << 3;
+
+        let mut raised = 0;
+        if invalid { raised |= VX; }
+        if div_zero { raised |= ZX; }
+        if overflow { raised |= OX; }
+        if underflow { raised |= UX; }
+        if inexact { raised |= XX; }
+        if raised != 0 {
+            self.state.fpscr |= FX | raised;
+        }
+        let enabled = ((invalid && self.state.fpscr & VE != 0)
+            || (overflow && self.state.fpscr & OE != 0)
+            || (underflow && self.state.fpscr & UE != 0)
+            || (div_zero && self.state.fpscr & ZE != 0)
+            || (inexact && self.state.fpscr & XE != 0));
+        if enabled { self.state.fpscr |= FEX; } else { self.state.fpscr &= !FEX; }
+        if record { self.copy_fpscr_to_cr1(); }
+    }
+
+    fn update_fpscr_for_result(&mut self, value: f64, operands: &[f64], record: bool) {
+        let invalid = value.is_nan() && !operands.iter().any(|operand| operand.is_nan());
+        let div_zero = operands.len() >= 2
+            && operands[1] == 0.0
+            && operands[0] != 0.0
+            && operands[0].is_finite();
+        let overflow = value.is_infinite() && operands.iter().all(|operand| operand.is_finite());
+        let underflow = value != 0.0 && value.is_subnormal();
+        self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, false, record);
+    }
+
+    fn fpscr_rounding_mode(&self) -> u32 {
+        self.state.fpscr & 0b11
+    }
+
+    fn round_fp_to_integer(&self, value: f64) -> f64 {
+        match self.fpscr_rounding_mode() {
+            0 => value.round_ties_even(),
+            1 => value.trunc(),
+            2 => value.ceil(),
+            _ => value.floor(),
+        }
+    }
+
+    fn write_fpscr_field(&mut self, field: usize, value: u8) {
+        let shift = 28 - (field * 4);
+        let mask = 0xF_u32 << shift;
+        self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) & 0xF) << shift);
+    }
+
     fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
         let field = bit_index / 4;
         let mask = 1 << (3 - (bit_index % 4));
