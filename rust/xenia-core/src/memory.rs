@@ -295,6 +295,30 @@ mod tests {
     }
 
     #[test]
+    fn reads_and_writes_big_endian_doublewords_atomically() {
+        let mut memory = GuestMemory::new(GuestAddress(0x5000), 8);
+        memory
+            .write_u64_be(GuestAddress(0x5000), 0x0123_4567_89AB_CDEF)
+            .unwrap();
+        assert_eq!(
+            memory.read_u64_be(GuestAddress(0x5000)),
+            Ok(0x0123_4567_89AB_CDEF)
+        );
+        assert_eq!(memory.read_u8(GuestAddress(0x5000)), Ok(0x01));
+
+        let mut short = GuestMemory::new(GuestAddress(0x6000), 7);
+        assert_eq!(
+            short.write_u64_be(GuestAddress(0x6000), u64::MAX),
+            Err(MemoryError::OutOfBounds)
+        );
+        assert_eq!(short.read_u8(GuestAddress(0x6000)), Ok(0));
+        assert_eq!(
+            short.read_u64_be(GuestAddress(0x6000)),
+            Err(MemoryError::OutOfBounds)
+        );
+    }
+
+    #[test]
     fn reports_region_length_and_base() {
         let memory = GuestMemory::new(GuestAddress(0x2000), 7);
         assert_eq!(memory.base(), GuestAddress(0x2000));
