@@ -789,6 +789,14 @@ impl PpcInterpreter {
         }
     }
 
+    fn set_fx_for_new_exception_bits(&mut self, previous_fpscr: u32) {
+        const EXCEPTION_BITS: u32 = 0x1FF8_0700;
+        let newly_set = self.state.fpscr & EXCEPTION_BITS & !previous_fpscr;
+        if newly_set != 0 {
+            self.state.fpscr |= 1 << 31;
+        }
+    }
+
     fn write_fpscr_field(&mut self, field: usize, value: u8) {
         let shift = 28 - (field * 4);
         let mut mask = 0xF_u32 << shift;
@@ -1715,7 +1723,9 @@ impl PpcInterpreter {
                         if bit != 1 && bit != 2 {
                             let mask = 1_u32 << (31 - bit);
                             if xo10 == 38 {
+                                let previous_fpscr = self.state.fpscr;
                                 self.state.fpscr |= mask;
+                                self.set_fx_for_new_exception_bits(previous_fpscr);
                             } else {
                                 self.state.fpscr &= !mask;
                             }
@@ -3274,6 +3284,44 @@ mod tests {
         assert_eq!(cpu.state.cr[0], 0x7);
         assert_eq!(cpu.state.fpscr & 0x0000_0700, 0);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+    }
+
+    #[test]
+    fn mtfsb1_sets_fx_when_it_raises_an_invalid_cause() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsb1 VXSQRT (FPSCR bit 22 in PowerPC numbering)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (22 << 21) | (38 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX
+    }
+
+    #[test]
+    fn mtfsfi_sets_exception_bits_without_implicitly_setting_fx() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsfi field 5, immediate 2 (VXSQRT)
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (5 << 23) | (2 << 12) | (134 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // FX is explicitly controlled
     }
 
     #[test]
