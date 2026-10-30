@@ -168,7 +168,7 @@ impl PpcInterpreter {
             }
             // rlwinm RA,RS,SH,MB,ME — rotate left word and mask.
             21 => {
-                let shift = ((instruction >> 11) & 0x1F) as u32;
+                let shift = (instruction >> 11) & 0x1F;
                 let mask_begin = ((instruction >> 6) & 0x1F) as u32;
                 let mask_end = ((instruction >> 1) & 0x1F) as u32;
                 let mut mask = 0_u32;
@@ -535,7 +535,7 @@ mod tests {
     fn mulli_reads_gpr_zero_as_a_register() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mulli r4,r0,2
-        put_instruction(&mut memory, 0x1000, (7 << 26) | (4 << 21) | (2 << 0));
+        put_instruction(&mut memory, 0x1000, (7 << 26) | (4 << 21) | 2);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[0] = 3;
