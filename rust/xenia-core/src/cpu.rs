@@ -5838,10 +5838,7 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_ne!(cpu.state.msr & (1 << 63), 0); // MSR[0] alias
-        assert_ne!(cpu.state.msr & (1 << 15), 0); // MSR[48] alias
-        assert_ne!(cpu.state.msr & (1 << 5), 0); // MSR[58] alias
-        assert_ne!(cpu.state.msr & (1 << 4), 0); // MSR[59] alias
+        assert_eq!(cpu.state.msr, 0xC000_0000_0000_C930); // Xenon mtmsrd L=0 aliases
         assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
         assert!(matches!(
             cpu.pending_exception(),
