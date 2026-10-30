@@ -416,7 +416,17 @@ impl PpcInterpreter {
         })
     }
 
-    fn scale_by_power_of_two(value: f64, exponent: i32) -> f64 {
+    fn scale_by_power_of_two(mut value: f64, mut exponent: i32) -> f64 {
+        const TWO_POW_1023: f64 = f64::from_bits(0x7FE0_0000_0000_0000);
+        const TWO_POW_NEG_1022: f64 = f64::from_bits(0x0010_0000_0000_0000);
+        while exponent > 1023 {
+            value *= TWO_POW_1023;
+            exponent -= 1023;
+        }
+        while exponent < -1022 {
+            value *= TWO_POW_NEG_1022;
+            exponent += 1022;
+        }
         value * 2.0_f64.powi(exponent)
     }
 
