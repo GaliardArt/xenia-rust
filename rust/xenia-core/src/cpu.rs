@@ -1262,9 +1262,7 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let value = if extended_opcode == 535 || extended_opcode == 567 {
                             Self::extend_single_preserving_nan(f32::from_bits(
-                                memory
-                                    .read_u32_be(GuestAddress(address))
-                                    .map_err(Into::into)?,
+                                memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?,
                             ))
                         } else {
                             f64::from_bits(
@@ -1349,10 +1347,9 @@ impl PpcInterpreter {
                         };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let value = match xo {
-                            87 | 119 => memory
-                                .read_u8(GuestAddress(address))
-                                .map_err(Into::into)?
-                                as u64,
+                            87 | 119 => {
+                                memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64
+                            }
                             279 | 311 => memory
                                 .read_u16_be(GuestAddress(address))
                                 .map_err(Into::into)?
@@ -1389,16 +1386,10 @@ impl PpcInterpreter {
                                 .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
                                 .map_err(Into::into)?,
                             407 | 439 => memory
-                                .write_u16_be(
-                                    GuestAddress(address),
-                                    self.state.gpr[rt_rs] as u16,
-                                )
+                                .write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
                                 .map_err(Into::into)?,
                             151 | 183 => memory
-                                .write_u32_be(
-                                    GuestAddress(address),
-                                    self.state.gpr[rt_rs] as u32,
-                                )
+                                .write_u32_be(GuestAddress(address), self.state.gpr[rt_rs] as u32)
                                 .map_err(Into::into)?,
                             _ => unreachable!(),
                         }
@@ -2228,9 +2219,8 @@ impl PpcInterpreter {
                     self.state.gpr[ra] as u32
                 };
                 let address = base.wrapping_add(immediate as u32);
-                self.state.gpr[rt_rs] = memory
-                    .read_u8(GuestAddress(address))
-                    .map_err(Into::into)? as u64;
+                self.state.gpr[rt_rs] =
+                    memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64;
                 self.state.pc = next_pc;
             }
             // lhz/lha RT,D(RA) — load an unsigned/signed big-endian halfword.
@@ -2280,9 +2270,7 @@ impl PpcInterpreter {
                     33 => memory
                         .read_u32_be(GuestAddress(address))
                         .map_err(Into::into)? as u64,
-                    35 => memory
-                        .read_u8(GuestAddress(address))
-                        .map_err(Into::into)? as u64,
+                    35 => memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64,
                     41 => memory
                         .read_u16_be(GuestAddress(address))
                         .map_err(Into::into)? as u64,
