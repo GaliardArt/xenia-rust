@@ -2987,18 +2987,19 @@ mod tests {
 
     #[test]
     fn stfs_uses_fpscr_rounding_without_changing_fpscr() {
-        let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
-        // stfs f1,0x1000(r0)
-        put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21) | 0x1000);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // stfs f1,4(r3)
+        put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21) | (3 << 16) | 4);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1000;
         cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
         cpu.state.fpscr = 0b10; // toward +infinity
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(
-            memory.read_u32_be(GuestAddress(0x1000)).unwrap(),
+            memory.read_u32_be(GuestAddress(0x1004)).unwrap(),
             f32::from_bits(0x3F80_0001).to_bits()
         );
         assert_eq!(cpu.state.fpscr, 0b10); // stores do not update FPSCR
@@ -3215,7 +3216,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 3.0);
-        assert_eq!(cpu.state.cr[1], 0x0B);
+        assert_eq!(cpu.state.cr[1], 0x0D);
     }
 
     #[test]
