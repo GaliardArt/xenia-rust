@@ -304,18 +304,27 @@ impl PpcInterpreter {
             }
             // lbz RT,D(RA) — load a zero-extended byte.
             34 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
                 let address = base.wrapping_add(immediate as u32);
-                self.state.gpr[rt_rs] = memory
-                    .read_u8(GuestAddress(address))
-                    .map_err(Into::into)? as u64;
+                self.state.gpr[rt_rs] =
+                    memory.read_u8(GuestAddress(address)).map_err(Into::into)? as u64;
                 self.state.pc = next_pc;
             }
             // lhz/lha RT,D(RA) — load an unsigned/signed big-endian halfword.
             40 | 42 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
                 let address = base.wrapping_add(immediate as u32);
-                let value = memory.read_u16_be(GuestAddress(address)).map_err(Into::into)?;
+                let value = memory
+                    .read_u16_be(GuestAddress(address))
+                    .map_err(Into::into)?;
                 self.state.gpr[rt_rs] = if opcode == 42 {
                     (value as i16 as i64) as u64
                 } else {
@@ -325,13 +334,19 @@ impl PpcInterpreter {
             }
             // stb/sth RS,D(RA) — store the low byte/halfword in guest big-endian order.
             38 | 44 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
                 let address = base.wrapping_add(immediate as u32);
                 if opcode == 38 {
-                    memory.write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
+                    memory
+                        .write_u8(GuestAddress(address), self.state.gpr[rt_rs] as u8)
                         .map_err(Into::into)?;
                 } else {
-                    memory.write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
+                    memory
+                        .write_u16_be(GuestAddress(address), self.state.gpr[rt_rs] as u16)
                         .map_err(Into::into)?;
                 }
                 self.state.pc = next_pc;
