@@ -507,7 +507,11 @@ impl PpcInterpreter {
                         if update && ra == 0 {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         if extended_opcode == 663 || extended_opcode == 695 {
                             memory
@@ -1298,9 +1302,7 @@ mod tests {
     fn divide_instructions_distinguish_word_doubleword_and_overflow_forms() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
         // divdu r5,r3,r4; divd r6,r3,r4; divwu r7,r3,r4; divw r8,r3,r4
-        let encode = |rt: u32, xo: u32| {
-            (31 << 26) | (rt << 21) | (3 << 16) | (4 << 11) | (xo << 1)
-        };
+        let encode = |rt: u32, xo: u32| (31 << 26) | (rt << 21) | (3 << 16) | (4 << 11) | (xo << 1);
         put_instruction(&mut memory, 0x1000, encode(5, 457));
         put_instruction(&mut memory, 0x1004, encode(6, 489));
         put_instruction(&mut memory, 0x1008, encode(7, 459));
