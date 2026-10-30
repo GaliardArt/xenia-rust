@@ -1629,7 +1629,7 @@ impl PpcInterpreter {
                     memory
                         .write_u32_be(
                             GuestAddress(address as u32),
-                            Self::narrow_single_preserving_nan(self.state.fpr[rt_rs]).to_bits(),
+                            self.narrow_single_for_store(self.state.fpr[rt_rs]).to_bits(),
                         )
                         .map_err(Into::into)?;
                 } else {
@@ -3193,7 +3193,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0xB000_0000 | (1 << 9); // retain VX summary through VXSQRT
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.cr[1], 0x0B);
+        assert_eq!(cpu.state.cr[1], 0x0F); // FX, FEX, VX and OX
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
     }
 
