@@ -131,26 +131,24 @@ impl XexLoadedImage {
     ///
     /// The operation is transactional: on any invalid descriptor or mapping
     /// conflict, the caller's address space remains unchanged.
-    pub fn map_into(
-        &self,
-        address_space: &mut GuestAddressSpace,
-    ) -> Result<(), XexLoadError> {
+    pub fn map_into(&self, address_space: &mut GuestAddressSpace) -> Result<(), XexLoadError> {
         let page_size = if self.security.image_flags & 0x1000_0000 != 0 {
             0x1000_usize
         } else {
             0x1_0000_usize
         };
-        let mapped_size = self.security.page_descriptors.iter().try_fold(
-            0_usize,
-            |total, descriptor| {
-                let descriptor_size = (descriptor.page_count as usize)
-                    .checked_mul(page_size)
-                    .ok_or(XexLoadError::MappedImageTooLarge)?;
-                total
-                    .checked_add(descriptor_size)
-                    .ok_or(XexLoadError::MappedImageTooLarge)
-            },
-        )?;
+        let mapped_size =
+            self.security
+                .page_descriptors
+                .iter()
+                .try_fold(0_usize, |total, descriptor| {
+                    let descriptor_size = (descriptor.page_count as usize)
+                        .checked_mul(page_size)
+                        .ok_or(XexLoadError::MappedImageTooLarge)?;
+                    total
+                        .checked_add(descriptor_size)
+                        .ok_or(XexLoadError::MappedImageTooLarge)
+                })?;
         if mapped_size > MAX_IMAGE_SIZE {
             return Err(XexLoadError::MappedImageTooLarge);
         }
@@ -185,12 +183,7 @@ impl XexLoadedImage {
                 .load_base
                 .checked_add(u32::try_from(offset).map_err(|_| XexLoadError::MappedImageTooLarge)?)
                 .ok_or(XexLoadError::MappedImageTooLarge)?;
-            staged.map_initialized(
-                GuestAddress(address),
-                size,
-                permissions,
-                bytes,
-            )?;
+            staged.map_initialized(GuestAddress(address), size, permissions, bytes)?;
             offset = end;
         }
 
@@ -456,7 +449,11 @@ mod tests {
         let loaded = load_xex2_image(&valid_xex()).unwrap();
         assert_eq!(loaded.security.load_address, 0x8200_0000);
         assert_eq!(&loaded.image[..valid_pe().len()], valid_pe().as_slice());
-        assert!(loaded.image[valid_pe().len()..].iter().all(|byte| *byte == 0));
+        assert!(
+            loaded.image[valid_pe().len()..]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
         assert_eq!(loaded.layout.entry_point, 0x8200_1000);
     }
 
@@ -526,17 +523,16 @@ mod tests {
         );
         assert_eq!(
             memory.read_bytes(GuestAddress(0x8200_1FFF), 2),
-            Err(AddressSpaceError::Memory(crate::memory::MemoryError::OutOfBounds))
+            Err(AddressSpaceError::Memory(
+                crate::memory::MemoryError::OutOfBounds
+            ))
         );
         assert_eq!(
             memory.write_u8(GuestAddress(0x8200_0200), 0),
             Err(AddressSpaceError::PermissionDenied)
         );
         assert_eq!(
-            crate::memory::GuestMemoryAccess::fetch_u32_be(
-                &memory,
-                GuestAddress(0x8200_0200)
-            ),
+            crate::memory::GuestMemoryAccess::fetch_u32_be(&memory, GuestAddress(0x8200_0200)),
             Ok(0xA5A5_A5A5)
         );
     }
@@ -598,7 +594,9 @@ mod tests {
 
         assert!(matches!(
             loaded.map_into(&mut memory),
-            Err(XexLoadError::AddressSpace(AddressSpaceError::OverlappingRegion))
+            Err(XexLoadError::AddressSpace(
+                AddressSpaceError::OverlappingRegion
+            ))
         ));
         assert_eq!(memory.read_u8(GuestAddress(0x8200_0000)), Ok(0x7B));
     }
