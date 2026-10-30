@@ -64,7 +64,7 @@ Additional direct `src/xenia` files include the emulator orchestration layer, co
 ## Current Rust track
 
 The current Rust workspace contains:
-- `xenia-core`: checked contiguous memory primitive plus a non-overlapping, permissioned region-based address space with protect/unmap operations; a memory-access trait used by the PPC interpreter; initial PPC subset (addi, addis, ori, oris, b, CR compares, CR-only beq/bne forms, lwz and stw); defensive XEX2 fixed-header/optional-header and security-info/page-descriptor parsers; Xbox-specific PE32 header/section parser; pure PE image-layout planner.
+- `xenia-core`: checked contiguous memory primitive plus a non-overlapping, permissioned region-based address space with protect/unmap operations; a memory-access trait used by the PPC interpreter; initial PPC subset (addi, addis, ori, oris, b, CR compares, CR-only beq/bne forms, lwz and stw); defensive XEX2 fixed-header/optional-header and security-info/page-descriptor parsers; Xbox-specific PE32 header/section parser; pure PE image-layout planner; restricted unencrypted/uncompressed XEX2 payload preparation.
 - `xenia-rust`: diagnostic CLI with `inspect-xex <file.xex>` (including security metadata), `inspect-pe <decompressed-image.bin>`, `--help`, and `--version`; it cannot execute games.
 
 These components are learning/test foundations, not a usable emulator. The XEX2 code does not decrypt/decompress, parse the embedded PE, map sections, or boot a title. Missing PPC instruction families, exceptions, full MMU behavior, executable loading, kernel APIs, graphics, audio, input, threading semantics, and game-level compatibility remain substantial work.
