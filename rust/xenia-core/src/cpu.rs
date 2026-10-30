@@ -2987,8 +2987,8 @@ mod tests {
 
     #[test]
     fn stfs_uses_fpscr_rounding_without_changing_fpscr() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
-        // stfs f1,0(r0)
+        let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
+        // stfs f1,0x1000(r0)
         put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21) | 0x1000);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
@@ -3006,7 +3006,7 @@ mod tests {
 
     #[test]
     fn stfsx_uses_fpscr_rounding_for_indexed_stores() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let mut memory = GuestMemory::new(GuestAddress(0), 0x2000);
         // stfsx f1,r0,r2
         put_instruction(
             &mut memory,
@@ -3210,7 +3210,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0;
-        cpu.state.fpscr = 0xB000_0280; // VXSQRT + VE keep VX/FEX summaries asserted
+        cpu.state.fpscr = 0xB000_0040; // OX + OE keep FEX asserted without VX
 
         cpu.step(&mut memory).unwrap();
 
