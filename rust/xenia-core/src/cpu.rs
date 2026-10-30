@@ -334,10 +334,10 @@ impl PpcInterpreter {
                                 (value, c1 || c2, overflow)
                             }
                             40 | 8 | 136 => {
-                                let borrow_in = if xo == 136 && self.state.xer & (1 << 29) != 0 {
-                                    0_u64
-                                } else {
+                                let borrow_in = if xo == 136 && self.state.xer & (1 << 29) == 0 {
                                     1_u64
+                                } else {
+                                    0_u64
                                 };
                                 let (partial, b1) = right.overflowing_sub(left);
                                 let (value, b2) = partial.overflowing_sub(borrow_in);
