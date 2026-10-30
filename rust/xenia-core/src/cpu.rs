@@ -1007,6 +1007,60 @@ mod tests {
     }
 
     #[test]
+    fn rotate_shift_and_sign_extension_instructions_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 32);
+        // rlwimi r4,r3,8,8,15
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (20 << 26) | (3 << 21) | (4 << 16) | (8 << 11) | (8 << 6) | (15 << 1),
+        );
+        // slw r5,r3,r6
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (31 << 26) | (5 << 21) | (3 << 16) | (6 << 11) | (24 << 1),
+        );
+        // srawi r7,r8,4
+        put_instruction(
+            &mut memory,
+            0x1008,
+            (31 << 26) | (7 << 21) | (8 << 16) | (4 << 11) | (824 << 1),
+        );
+        // extsh r9,r10; cntlzw r11,r12
+        put_instruction(
+            &mut memory,
+            0x100C,
+            (31 << 26) | (9 << 21) | (10 << 16) | (922 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1010,
+            (31 << 26) | (11 << 21) | (12 << 16) | (26 << 1),
+        );
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1234_5678;
+        cpu.state.gpr[4] = 0xA5A5_A5A5;
+        cpu.state.gpr[6] = 4;
+        cpu.state.gpr[8] = (-17_i64) as u64;
+        cpu.state.gpr[10] = 0x8001;
+        cpu.state.gpr[12] = 1;
+
+        for _ in 0..5 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[4], 0xA578_A5A5);
+        assert_eq!(cpu.state.gpr[5], 0x0001_2340);
+        assert_eq!(cpu.state.gpr[7], (-2_i64) as u64);
+        assert_ne!(cpu.state.xer & (1 << 29), 0);
+        assert_eq!(cpu.state.gpr[9], 0xFFFF_FFFF_FFFF_8001);
+        assert_eq!(cpu.state.gpr[11], 31);
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
