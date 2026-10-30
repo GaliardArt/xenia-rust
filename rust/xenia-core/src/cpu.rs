@@ -106,6 +106,13 @@ pub enum PpcException {
         causes: u32,
         mode: PpcFpExceptionMode,
     },
+    /// Enabling FE0/FE1 while FPSCR.FEX is already set raises a
+    /// program exception associated with the next instruction address.
+    FloatingPointEnableTransition {
+        next_pc: u32,
+        causes: u32,
+        mode: PpcFpExceptionMode,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -295,6 +302,37 @@ impl PpcInterpreter {
                 mode,
             });
         }
+    }
+
+    fn enabled_fpscr_exception_causes(&self) -> u32 {
+        const VX: u32 = 1 << 29;
+        const OX: u32 = 1 << 28;
+        const UX: u32 = 1 << 27;
+        const ZX: u32 = 1 << 26;
+        const XX: u32 = 1 << 25;
+        const VE: u32 = 1 << 7;
+        const OE: u32 = 1 << 6;
+        const UE: u32 = 1 << 5;
+        const ZE: u32 = 1 << 4;
+        const XE: u32 = 1 << 3;
+        const VX_CAUSES: u32 = 0x01F8_0700;
+
+        let fpscr = self.state.fpscr;
+        let mut causes = 0;
+        if fpscr & VX != 0 && fpscr & VE != 0 {
+            causes |= VX | (fpscr & VX_CAUSES);
+        }
+        for (status, enable, cause) in [
+            (OX, OE, OX),
+            (UX, UE, UX),
+            (ZX, ZE, ZX),
+            (XX, XE, XX),
+        ] {
+            if fpscr & status != 0 && fpscr & enable != 0 {
+                causes |= cause;
+            }
+        }
+        causes
     }
 
     fn update_fpscr_exceptions(&mut self, exceptions: FpExceptionFlags, record: bool) {
@@ -993,6 +1031,12 @@ impl PpcInterpreter {
         {
             return Err(PpcError::PendingException(exception));
         }
+        if let Some(
+            exception @ PpcException::FloatingPointEnableTransition { .. },
+        ) = self.pending_exception
+        {
+            return Err(PpcError::PendingException(exception));
+        }
         let pc = self.state.pc;
         let instruction = memory.fetch_u32_be(GuestAddress(pc)).map_err(Into::into)?;
         let opcode = instruction >> 26;
@@ -1201,6 +1245,31 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
+                    146 => {
+                        // mtmsr is context-synchronizing. A transition from
+                        // FE=00 to FE!=00 with sticky FEX already asserted
+                        // raises a program exception at the next instruction.
+                        let previous_mode = self.fp_exception_mode();
+                        self.state.msr = self.state.gpr[rt_rs] as u32;
+                        let mode = self.fp_exception_mode();
+                        self.state.pc = next_pc;
+                        if previous_mode == PpcFpExceptionMode::Disabled
+                            && mode != PpcFpExceptionMode::Disabled
+                            && self.state.fpscr & (1 << 30) != 0
+                            && self.pending_exception.is_none()
+                        {
+                            let causes = self.enabled_fpscr_exception_causes();
+                            if causes != 0 {
+                                self.pending_exception =
+                                    Some(PpcException::FloatingPointEnableTransition {
+                                        next_pc,
+                                        causes,
+                                        mode,
+                                    });
+                            }
+                        }
+                        return Ok(());
+                    }
                     598 => {
                         // sync is execution-synchronizing. Surface delayed
                         // imprecise FP exceptions only after advancing past it.
@@ -4951,6 +5020,53 @@ mod tests {
                 mode: PpcFpExceptionMode::ImpreciseRecoverable,
             })
         );
+    }
+
+    #[test]
+    fn mtmsr_enabling_fp_exceptions_with_sticky_fex_raises_at_next_pc() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // mtmsr r3; addi r4,r4,1
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (3 << 21) | (146 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = (PPC_MSR_FE0 | PPC_MSR_FE1) as u64;
+        cpu.state.fpscr = (1 << 30) | (1 << 29) | (1 << 24) | (1 << 7);
+
+        cpu.step(&mut memory).unwrap();
+
+        let pending = PpcException::FloatingPointEnableTransition {
+            next_pc: 0x1004,
+            causes: (1 << 29) | (1 << 24),
+            mode: PpcFpExceptionMode::Precise,
+        };
+        assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1);
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.pending_exception(), Some(pending));
+        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.state.gpr[4], 0);
+    }
+
+    #[test]
+    fn mtmsr_does_not_retrigger_when_fe_was_already_enabled() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtmsr r3
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.msr = PPC_MSR_FE0;
+        cpu.state.gpr[3] = PPC_MSR_FE0 as u64;
+        cpu.state.fpscr = (1 << 30) | (1 << 29) | (1 << 24) | (1 << 7);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.pending_exception(), None);
+        assert_eq!(cpu.state.pc, 0x1004);
     }
 
     #[test]
