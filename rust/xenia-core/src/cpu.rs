@@ -129,6 +129,8 @@ impl PpcInterpreter {
     }
 
     /// Removes the pending guest exception notification for CPU-layer handling.
+    /// In imprecise modes, the caller must defer architectural delivery until
+    /// the appropriate guest synchronization point.
     pub fn take_pending_exception(&mut self) -> Option<PpcException> {
         self.pending_exception.take()
     }
@@ -4860,6 +4862,34 @@ mod tests {
 
         cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Precise);
+    }
+
+    #[test]
+    fn imprecise_recoverable_mode_is_preserved_in_fp_exception_event() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0; // imprecise recoverable
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                causes: (1 << 29) | (1 << 21),
+                mode: PpcFpExceptionMode::ImpreciseRecoverable,
+            })
+        );
     }
 
     #[test]
