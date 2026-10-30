@@ -13,6 +13,8 @@ pub struct PpcState {
     /// General-purpose registers. The Xenon PPC context uses 64-bit GPR storage.
     pub gpr: [u64; 32],
     pub fpr: [f64; 32],
+    /// VMX128 register file. Each vector is stored in guest byte order.
+    pub vr: [[u8; 16]; 128],
     pub pc: u32,
     pub lr: u64,
     pub ctr: u64,
@@ -588,6 +590,82 @@ impl PpcInterpreter {
                     }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
+                self.state.pc = next_pc;
+            }
+            // Initial VMX integer/logic subset (standard 5-bit register forms).
+            4 => {
+                let vd = ((instruction >> 21) & 0x1F) as usize;
+                let va = ((instruction >> 16) & 0x1F) as usize;
+                let vb = ((instruction >> 11) & 0x1F) as usize;
+                let xo = instruction & 0x7FF;
+                let a = self.state.vr[va];
+                let b = self.state.vr[vb];
+                let mut result = [0_u8; 16];
+                match xo {
+                    0x000 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane].wrapping_add(b[lane]);
+                        }
+                    }
+                    0x040 => {
+                        for lane in 0..8 {
+                            let offset = lane * 2;
+                            let av = u16::from_be_bytes([a[offset], a[offset + 1]]);
+                            let bv = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                            result[offset..offset + 2]
+                                .copy_from_slice(&av.wrapping_add(bv).to_be_bytes());
+                        }
+                    }
+                    0x080 => {
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                            result[offset..offset + 4]
+                                .copy_from_slice(&av.wrapping_add(bv).to_be_bytes());
+                        }
+                    }
+                    0x400 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane].wrapping_sub(b[lane]);
+                        }
+                    }
+                    0x440 => {
+                        for lane in 0..8 {
+                            let offset = lane * 2;
+                            let av = u16::from_be_bytes([a[offset], a[offset + 1]]);
+                            let bv = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                            result[offset..offset + 2]
+                                .copy_from_slice(&av.wrapping_sub(bv).to_be_bytes());
+                        }
+                    }
+                    0x480 => {
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                            result[offset..offset + 4]
+                                .copy_from_slice(&av.wrapping_sub(bv).to_be_bytes());
+                        }
+                    }
+                    0x404 => {
+                        for lane in 0..16 { result[lane] = a[lane] & b[lane]; }
+                    }
+                    0x444 => {
+                        for lane in 0..16 { result[lane] = a[lane] & !b[lane]; }
+                    }
+                    0x484 => {
+                        for lane in 0..16 { result[lane] = a[lane] | b[lane]; }
+                    }
+                    0x4C4 => {
+                        for lane in 0..16 { result[lane] = a[lane] ^ b[lane]; }
+                    }
+                    0x504 => {
+                        for lane in 0..16 { result[lane] = !(a[lane] | b[lane]); }
+                    }
+                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                }
+                self.state.vr[vd] = result;
                 self.state.pc = next_pc;
             }
             // Floating-point execution: A-form arithmetic and common X-form operations.
