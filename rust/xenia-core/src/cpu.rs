@@ -64,8 +64,14 @@ impl Default for PpcState {
 pub enum PpcError {
     Memory(MemoryError),
     AddressSpace(AddressSpaceError),
-    UnsupportedInstruction { pc: u32, opcode: u32 },
-    UnsupportedBranchOption { pc: u32, bo: u8 },
+    UnsupportedInstruction {
+        pc: u32,
+        opcode: u32,
+    },
+    UnsupportedBranchOption {
+        pc: u32,
+        bo: u8,
+    },
     /// The caller must dispatch or explicitly consume this exception before stepping again.
     PendingException(PpcException),
 }
@@ -175,12 +181,8 @@ impl PpcInterpreter {
 
         let exception = self.pending_exception.take()?;
         let (saved_pc, subsequent_instruction) = match exception {
-            PpcException::FloatingPoint { instruction_pc, .. } => {
-                (instruction_pc as u64, false)
-            }
-            PpcException::FloatingPointEnableTransition { next_pc, .. } => {
-                (next_pc as u64, true)
-            }
+            PpcException::FloatingPoint { instruction_pc, .. } => (instruction_pc as u64, false),
+            PpcException::FloatingPointEnableTransition { next_pc, .. } => (next_pc as u64, true),
         };
 
         self.state.srr0 = saved_pc;
@@ -189,11 +191,9 @@ impl PpcInterpreter {
         } else {
             0
         };
-        self.state.srr1 = (self.state.msr & SRR1_MSR_MASK)
-            | PPC_SRR1_FP_ENABLED_EXCEPTION
-            | exception_status;
-        self.state.msr =
-            (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
+        self.state.srr1 =
+            (self.state.msr & SRR1_MSR_MASK) | PPC_SRR1_FP_ENABLED_EXCEPTION | exception_status;
+        self.state.msr = (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
         self.state.pc = PPC_PROGRAM_EXCEPTION_VECTOR;
 
         Some(exception)
@@ -206,7 +206,8 @@ impl PpcInterpreter {
         match self.pending_exception {
             Some(
                 exception @ PpcException::FloatingPoint {
-                    mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                    mode:
+                        PpcFpExceptionMode::ImpreciseNonRecoverable
                         | PpcFpExceptionMode::ImpreciseRecoverable,
                     ..
                 },
@@ -346,12 +347,7 @@ impl PpcInterpreter {
         {
             causes |= VX | invalid_causes;
         }
-        for (status, enable, cause) in [
-            (OX, OE, OX),
-            (UX, UE, UX),
-            (ZX, ZE, ZX),
-            (XX, XE, XX),
-        ] {
+        for (status, enable, cause) in [(OX, OE, OX), (UX, UE, UX), (ZX, ZE, ZX), (XX, XE, XX)] {
             if self.state.fpscr & status != 0
                 && self.state.fpscr & enable != 0
                 && (newly_set & status != 0 || previous_fpscr & enable == 0)
@@ -1091,16 +1087,17 @@ impl PpcInterpreter {
         // A precise exception must be dispatched before another instruction executes.
         // Imprecise-mode events remain pending while the guest advances to a
         // synchronization point; the outer CPU loop owns that scheduling.
-        if let Some(exception @ PpcException::FloatingPoint {
-            mode: PpcFpExceptionMode::Precise,
-            ..
-        }) = self.pending_exception
+        if let Some(
+            exception @ PpcException::FloatingPoint {
+                mode: PpcFpExceptionMode::Precise,
+                ..
+            },
+        ) = self.pending_exception
         {
             return Err(PpcError::PendingException(exception));
         }
-        if let Some(
-            exception @ PpcException::FloatingPointEnableTransition { .. },
-        ) = self.pending_exception
+        if let Some(exception @ PpcException::FloatingPointEnableTransition { .. }) =
+            self.pending_exception
         {
             return Err(PpcError::PendingException(exception));
         }
@@ -1279,7 +1276,8 @@ impl PpcInterpreter {
                     self.state.pc = next_pc;
                     if let Some(
                         exception @ PpcException::FloatingPoint {
-                            mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                            mode:
+                                PpcFpExceptionMode::ImpreciseNonRecoverable
                                 | PpcFpExceptionMode::ImpreciseRecoverable,
                             ..
                         },
@@ -1345,8 +1343,8 @@ impl PpcInterpreter {
                         if record {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
-                        let spr = (((instruction >> 11) & 0x1F) << 5)
-                            | ((instruction >> 16) & 0x1F);
+                        let spr =
+                            (((instruction >> 11) & 0x1F) << 5) | ((instruction >> 16) & 0x1F);
                         match (extended_opcode, spr) {
                             (339, 26) => self.state.gpr[rt_rs] = self.state.srr0,
                             (339, 27) => self.state.gpr[rt_rs] = self.state.srr1,
@@ -1368,7 +1366,8 @@ impl PpcInterpreter {
                         // this instruction changes the machine state.
                         if let Some(
                             exception @ PpcException::FloatingPoint {
-                                mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                                mode:
+                                    PpcFpExceptionMode::ImpreciseNonRecoverable
                                     | PpcFpExceptionMode::ImpreciseRecoverable,
                                 ..
                             },
@@ -4986,7 +4985,10 @@ mod tests {
                 mode: PpcFpExceptionMode::Precise,
             })
         );
-        assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(1) as f64).to_bits());
+        assert_eq!(
+            cpu.state.fpr[1].to_bits(),
+            (f32::from_bits(1) as f64).to_bits()
+        );
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // enabled underflow: UX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
     }
@@ -5126,10 +5128,16 @@ mod tests {
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Disabled);
 
         cpu.state.msr = PPC_MSR_FE1;
-        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::ImpreciseNonRecoverable);
+        assert_eq!(
+            cpu.fp_exception_mode(),
+            PpcFpExceptionMode::ImpreciseNonRecoverable
+        );
 
         cpu.state.msr = PPC_MSR_FE0;
-        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::ImpreciseRecoverable);
+        assert_eq!(
+            cpu.fp_exception_mode(),
+            PpcFpExceptionMode::ImpreciseRecoverable
+        );
 
         cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Precise);
@@ -5178,7 +5186,10 @@ mod tests {
 
         assert_eq!(
             cpu.step(&mut memory),
-            Err(PpcError::UnsupportedInstruction { pc: 0x1000, opcode: 31 })
+            Err(PpcError::UnsupportedInstruction {
+                pc: 0x1000,
+                opcode: 31
+            })
         );
         assert_eq!(cpu.state.msr, 0);
         assert_eq!(cpu.state.pc, 0x1000);
@@ -5188,11 +5199,7 @@ mod tests {
     fn mtmsr_enabling_fp_exceptions_with_sticky_fex_raises_at_next_pc() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // mtmsr r3; addi r4,r4,1
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (31 << 26) | (3 << 21) | (146 << 1),
-        );
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
@@ -5209,7 +5216,10 @@ mod tests {
         assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1);
         assert_eq!(cpu.state.pc, 0x1004);
         assert_eq!(cpu.pending_exception(), Some(pending));
-        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending))
+        );
         assert_eq!(cpu.state.pc, 0x1004);
         assert_eq!(cpu.state.gpr[4], 0);
     }
@@ -5497,10 +5507,10 @@ mod tests {
     #[test]
     fn fpscr_instructions_deliver_prior_imprecise_fp_exceptions_before_execution() {
         let fpscr_instructions = [
-            (63 << 26) | (1 << 23) | (64 << 1), // mcrfs cr1, fpscr0
+            (63 << 26) | (1 << 23) | (64 << 1),  // mcrfs cr1, fpscr0
             (63 << 26) | (1 << 21) | (583 << 1), // mffs f1
-            (63 << 26) | (7 << 21) | (38 << 1), // mtfsb1
-            (63 << 26) | (7 << 21) | (70 << 1), // mtfsb0
+            (63 << 26) | (7 << 21) | (38 << 1),  // mtfsb1
+            (63 << 26) | (7 << 21) | (70 << 1),  // mtfsb0
             (63 << 26) | (7 << 23) | (1 << 12) | (134 << 1), // mtfsfi
             (63 << 26) | (0xFF << 17) | (1 << 11) | (711 << 1), // mtfsf
         ];
@@ -5555,8 +5565,6 @@ mod tests {
         assert_eq!(cpu.state.fpscr & (1 << 31), 0); // FX comes only from source bit 31
     }
 
-
-
     #[test]
     fn precise_fp_exception_enters_program_vector_and_saves_xenon_state() {
         let mut cpu = PpcInterpreter::default();
@@ -5573,7 +5581,10 @@ mod tests {
         assert_eq!(cpu.enter_pending_exception(), Some(exception));
 
         assert_eq!(cpu.state.srr0, 0x1234);
-        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(
+            cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION,
+            PPC_SRR1_FP_ENABLED_EXCEPTION
+        );
         assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, 0);
         assert_eq!(
             cpu.state.srr1 & 0xFFFF_FFFF_87C0_FFFF,
@@ -5626,7 +5637,6 @@ mod tests {
         assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
     }
 
-
     #[test]
     fn rfid_restores_fp_exception_context_without_replaying_srr1_syndrome_bits() {
         let mut memory = GuestMemory::new(GuestAddress(0x700), 4);
@@ -5649,22 +5659,20 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.pc, 0x1234);
-        assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
+        assert_eq!(
+            cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1),
+            PPC_MSR_FE0 | PPC_MSR_FE1
+        );
         assert_eq!(cpu.state.msr & 0x30, 0x30); // IR/DR restored from SRR1.
         assert_eq!(cpu.state.msr & (1 << 20), 0); // SRR1 bit 43 is exception syndrome.
         assert_eq!(cpu.state.msr & (1 << 16), 0); // SRR1 bit 47 is not copied into the MSR.
     }
 
-
     #[test]
     fn mfspr_and_mtspr_access_srr0_and_srr1_for_exception_handlers() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_spr = |rt: u32, spr: u32, xo: u32| {
-            (31 << 26)
-                | (rt << 21)
-                | ((spr & 0x1F) << 16)
-                | (((spr >> 5) & 0x1F) << 11)
-                | (xo << 1)
+            (31 << 26) | (rt << 21) | ((spr & 0x1F) << 16) | (((spr >> 5) & 0x1F) << 11) | (xo << 1)
         };
         put_instruction(&mut memory, 0x1000, encode_spr(3, 26, 339)); // mfspr r3,SRR0
         put_instruction(&mut memory, 0x1004, encode_spr(4, 27, 339)); // mfspr r4,SRR1
