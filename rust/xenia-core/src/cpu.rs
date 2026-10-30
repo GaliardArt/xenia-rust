@@ -346,8 +346,8 @@ impl PpcInterpreter {
                         // mfspr/mtspr encode the two five-bit SPR halves in
                         // reversed field order. Only architectural SPRs represented
                         // by the current CPU state are accepted.
-                        let spr = ((instruction >> 16) & 0x1F)
-                            | (((instruction >> 11) & 0x1F) << 5);
+                        let spr =
+                            ((instruction >> 16) & 0x1F) | (((instruction >> 11) & 0x1F) << 5);
                         match (extended_opcode, spr) {
                             (339, 1) => self.state.gpr[rt_rs] = self.state.xer as u32 as u64,
                             (467, 1) => self.state.xer = self.state.gpr[rt_rs] as u32 as u64,
