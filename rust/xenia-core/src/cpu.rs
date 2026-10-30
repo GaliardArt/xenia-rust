@@ -431,22 +431,37 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
-                    459 | 491 | 971 | 1003 => {
-                        let dividend = self.state.gpr[ra] as u32;
-                        let divisor = self.state.gpr[rb] as u32;
-                        let signed = xo == 491;
-                        let (value, overflow) = if divisor == 0 {
-                            (0, true)
-                        } else if signed {
-                            let a = dividend as i32;
-                            let b = divisor as i32;
-                            if a == i32::MIN && b == -1 {
-                                (0, true)
+                    457 | 459 | 489 | 491 => {
+                        // divdu/divwu/divd/divw. OE is decoded independently from
+                        // the XO field; it must not be mistaken for a 64-bit opcode.
+                        let is_64_bit = matches!(xo, 457 | 489);
+                        let signed = matches!(xo, 489 | 491);
+                        let (value, overflow) = if is_64_bit {
+                            if signed {
+                                match (left as i64).checked_div(right as i64) {
+                                    Some(result) => (result as u64, false),
+                                    None => (0, true),
+                                }
                             } else {
-                                ((a / b) as u32 as u64, false)
+                                match left.checked_div(right) {
+                                    Some(result) => (result, false),
+                                    None => (0, true),
+                                }
                             }
                         } else {
-                            ((dividend / divisor) as u64, false)
+                            let dividend = left as u32;
+                            let divisor = right as u32;
+                            if signed {
+                                match (dividend as i32).checked_div(divisor as i32) {
+                                    Some(result) => (result as u32 as u64, false),
+                                    None => (0, true),
+                                }
+                            } else {
+                                match dividend.checked_div(divisor) {
+                                    Some(result) => (result as u64, false),
+                                    None => (0, true),
+                                }
+                            }
                         };
                         self.state.gpr[rt_rs] = value;
                         if oe {
@@ -1277,6 +1292,41 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[6], 4);
         assert_ne!(cpu.state.xer & (1 << 29), 0);
+    }
+
+    #[test]
+    fn divide_instructions_distinguish_word_doubleword_and_overflow_forms() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        // divdu r5,r3,r4; divd r6,r3,r4; divwu r7,r3,r4; divw r8,r3,r4
+        let encode = |rt: u32, xo: u32| {
+            (31 << 26) | (rt << 21) | (3 << 16) | (4 << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode(5, 457));
+        put_instruction(&mut memory, 0x1004, encode(6, 489));
+        put_instruction(&mut memory, 0x1008, encode(7, 459));
+        put_instruction(&mut memory, 0x100C, encode(8, 491));
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1_0000_0000;
+        cpu.state.gpr[4] = 2;
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+        assert_eq!(cpu.state.gpr[5], 0x8000_0000);
+        assert_eq!(cpu.state.gpr[6], 0x8000_0000);
+        assert_eq!(cpu.state.gpr[7], 0);
+        assert_eq!(cpu.state.gpr[8], 0);
+
+        // divd overflow: signed minimum divided by -1 with OE set.
+        put_instruction(&mut memory, 0x1010, encode(9, 489) | (1 << 10));
+        cpu.state.pc = 0x1010;
+        cpu.state.gpr[3] = i64::MIN as u64;
+        cpu.state.gpr[4] = u64::MAX;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[9], 0);
+        assert_ne!(cpu.state.xer & (1 << 30), 0);
+        assert_ne!(cpu.state.xer & (1 << 31), 0);
     }
 
     #[test]
