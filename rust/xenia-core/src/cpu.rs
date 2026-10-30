@@ -229,18 +229,23 @@ impl PpcInterpreter {
     }
 
     fn set_fprf_for_value(&mut self, value: f64) {
+        self.set_fprf_for_value_precision(value, false);
+    }
+
+    fn set_fprf_for_value_precision(&mut self, value: f64, single_precision: bool) {
         const FPRF_MASK: u32 = 0x0000_3E00;
+        let denormal = if single_precision {
+            value.abs() < f32::MIN_POSITIVE as f64
+        } else {
+            value.is_subnormal()
+        };
         let class = if value.is_nan() {
-            if Self::is_signaling_nan(value) {
-                0x00
-            } else {
-                0x11
-            }
+            if Self::is_signaling_nan(value) { 0x00 } else { 0x11 }
         } else if value.is_infinite() {
             if value.is_sign_negative() { 0x09 } else { 0x05 }
         } else if value == 0.0 {
             if value.is_sign_negative() { 0x12 } else { 0x02 }
-        } else if value.is_subnormal() {
+        } else if denormal {
             if value.is_sign_negative() { 0x18 } else { 0x14 }
         } else if value.is_sign_negative() {
             0x08
@@ -274,6 +279,7 @@ impl PpcInterpreter {
         inexact: bool,
         fraction_rounded: bool,
         overflow: bool,
+        single_precision: bool,
         record: bool,
     ) -> bool {
         let has_nan_operand = operands.iter().any(|operand| operand.is_nan());
@@ -354,7 +360,7 @@ impl PpcInterpreter {
         let invalid_enabled = invalid && self.state.fpscr & (1 << 7) != 0;
         let div_zero_enabled = div_zero && self.state.fpscr & (1 << 4) != 0;
         if !invalid_enabled && !div_zero_enabled {
-            self.set_fprf_for_value(value);
+            self.set_fprf_for_value_precision(value, single_precision);
         }
         let update_rounding = operation != 26 || invalid || div_zero;
         self.update_fpscr_exceptions(
@@ -1852,6 +1858,7 @@ impl PpcInterpreter {
                                 || overflow,
                             fraction_rounded,
                             overflow,
+                            true,
                             record,
                         );
                         if invalid_enabled {
@@ -1896,6 +1903,7 @@ impl PpcInterpreter {
                                         | (if source_signaling_nan { 1 << 24 } else { 0 }),
                                     ..FpExceptionFlags::default()
                                 },
+                                single || xo10 == 12,
                                 record,
                             );
                             if conversion_invalid && self.state.fpscr & (1 << 7) != 0 {
@@ -2675,6 +2683,25 @@ mod tests {
         assert_eq!(cpu.state.fpr[5], 5.625);
         assert_eq!(cpu.state.cr[2], 0b0100);
         assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF: greater
+    }
+
+    #[test]
+    fn frsp_classifies_single_precision_denormals_in_fprf() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // frsp f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (12 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f32::from_bits(1) as f64;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1], f32::from_bits(1) as f64);
+        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2800); // positive single denormal
     }
 
     #[test]
