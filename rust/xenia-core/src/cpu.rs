@@ -201,6 +201,31 @@ impl PpcInterpreter {
         }
     }
 
+    fn set_fprf_for_value(&mut self, value: f64) {
+        const FPRF_MASK: u32 = 0x0001_F000;
+        let class = if value.is_nan() {
+            0x11
+        } else if value.is_infinite() {
+            if value.is_sign_negative() { 0x09 } else { 0x05 }
+        } else if value == 0.0 {
+            if value.is_sign_negative() { 0x12 } else { 0x02 }
+        } else if value.is_subnormal() {
+            if value.is_sign_negative() { 0x18 } else { 0x14 }
+        } else if value.is_sign_negative() {
+            0x08
+        } else {
+            0x04
+        };
+        self.state.fpscr =
+            (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 12);
+    }
+
+    fn set_fprf_condition(&mut self, condition: u8) {
+        const FPRF_MASK: u32 = 0x0001_F000;
+        self.state.fpscr = (self.state.fpscr & !FPRF_MASK)
+            | (((condition as u32) & 0x1F) << 12);
+    }
+
     fn is_signaling_nan(value: f64) -> bool {
         let bits = value.to_bits();
         (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
@@ -227,8 +252,16 @@ impl PpcInterpreter {
             && operands[0].is_finite();
         let overflow =
             value.is_infinite() && !div_zero && operands.iter().all(|operand| operand.is_finite());
-        let underflow = value != 0.0 && value.is_subnormal();
-        self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, inexact, record);
+        let underflow = value != 0.0 && value.is_subnormal() && inexact;
+        self.set_fprf_for_value(value);
+        self.update_fpscr_exceptions(
+            invalid,
+            div_zero,
+            overflow,
+            underflow,
+            inexact || overflow,
+            record,
+        );
     }
 
     fn fpscr_rounding_mode(&self) -> u32 {
@@ -1164,15 +1197,17 @@ impl PpcInterpreter {
                     // fcmpu / fcmpo
                     let field = ((instruction >> 23) & 0x7) as usize;
                     let unordered = a.is_nan() || b.is_nan();
-                    self.state.cr[field] = if unordered {
-                        0b0001
+                    let condition = if unordered {
+                        0b1_0001
                     } else if a < b {
-                        0b1000
+                        0b0_1000
                     } else if a > b {
-                        0b0100
+                        0b0_0100
                     } else {
-                        0b0010
+                        0b0_0010
                     };
+                    self.state.cr[field] = condition as u8;
+                    self.set_fprf_condition(condition);
                     let signaling_nan = [a, b].iter().any(|value| {
                         let bits = value.to_bits();
                         (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
