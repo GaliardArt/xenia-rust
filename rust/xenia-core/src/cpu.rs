@@ -222,14 +222,12 @@ impl PpcInterpreter {
         } else {
             0x04
         };
-        self.state.fpscr =
-            (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 12);
+        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | ((class as u32) << 12);
     }
 
     fn set_fprf_condition(&mut self, condition: u8) {
         const FPRF_MASK: u32 = 0x0001_F000;
-        self.state.fpscr = (self.state.fpscr & !FPRF_MASK)
-            | (((condition as u32) & 0x1F) << 12);
+        self.state.fpscr = (self.state.fpscr & !FPRF_MASK) | (((condition as u32) & 0x1F) << 12);
     }
 
     fn is_signaling_nan(value: f64) -> bool {
@@ -1294,7 +1292,7 @@ impl PpcInterpreter {
                     }
                 };
 
-                if xo5 == 23 && update_status == false {
+                if xo5 == 23 && !update_status {
                     self.set_fprf_for_value(value);
                 }
 
