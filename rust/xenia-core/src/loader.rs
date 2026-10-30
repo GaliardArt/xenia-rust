@@ -48,13 +48,27 @@ impl fmt::Display for XexLoadError {
             Self::SecurityInfo(error) => write!(f, "XEX security info: {error}"),
             Self::Pe(error) => write!(f, "embedded PE image: {error}"),
             Self::Layout(error) => write!(f, "PE image layout: {error}"),
-            Self::MissingFileFormatHeader => f.write_str("XEX file-format optional header is missing"),
-            Self::FileFormatHeaderOutOfBounds => f.write_str("XEX file-format header exceeds file bounds"),
-            Self::InvalidFileFormatHeaderSize => f.write_str("XEX file-format header size is invalid"),
-            Self::UnsupportedEncryption(value) => write!(f, "unsupported XEX encryption type {value}"),
-            Self::UnsupportedCompression(value) => write!(f, "unsupported XEX compression type {value}"),
-            Self::ImagePayloadOutOfBounds => f.write_str("XEX image payload starts beyond end of file"),
-            Self::ImageSmallerThanDeclared => f.write_str("XEX image payload is smaller than declared image size"),
+            Self::MissingFileFormatHeader => {
+                f.write_str("XEX file-format optional header is missing")
+            }
+            Self::FileFormatHeaderOutOfBounds => {
+                f.write_str("XEX file-format header exceeds file bounds")
+            }
+            Self::InvalidFileFormatHeaderSize => {
+                f.write_str("XEX file-format header size is invalid")
+            }
+            Self::UnsupportedEncryption(value) => {
+                write!(f, "unsupported XEX encryption type {value}")
+            }
+            Self::UnsupportedCompression(value) => {
+                write!(f, "unsupported XEX compression type {value}")
+            }
+            Self::ImagePayloadOutOfBounds => {
+                f.write_str("XEX image payload starts beyond end of file")
+            }
+            Self::ImageSmallerThanDeclared => {
+                f.write_str("XEX image payload is smaller than declared image size")
+            }
         }
     }
 }
