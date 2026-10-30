@@ -1016,7 +1016,8 @@ impl PpcInterpreter {
         }
         let previous_fpscr = self.state.fpscr;
         self.state.fpscr = (self.state.fpscr & !mask) | (((value as u32) << shift) & mask);
-        self.set_fx_for_new_exception_bits(previous_fpscr);
+        // mtfsfi writes FX explicitly; unlike arithmetic and mtfsb1, it must
+        // not set FX as a side effect of setting a sticky exception cause.
         self.refresh_fpscr_fex();
         self.queue_fpscr_write_exception(self.state.pc, previous_fpscr);
     }
@@ -2082,7 +2083,8 @@ impl PpcInterpreter {
                             mask &= !((1 << 30) | (1 << 29));
                             self.state.fpscr = (self.state.fpscr & !mask) | (value & mask);
                         }
-                        self.set_fx_for_new_exception_bits(previous_fpscr);
+                        // mtfsf can explicitly write FX, so setting a sticky
+                        // cause in the same transfer must not implicitly set it.
                         self.refresh_fpscr_fex();
                         self.queue_fpscr_write_exception(pc, previous_fpscr);
                         if record {
@@ -5437,5 +5439,26 @@ mod tests {
             assert_eq!(cpu.pending_exception(), Some(pending));
         }
     }
+
+    #[test]
+    fn mtfsf_sets_exception_cause_without_implicitly_setting_fx() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsf 0xFF,f2: write VXSQRT while explicitly keeping FX clear.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (0xFF << 17) | (2 << 11) | (711 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits(1 << 9);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
+        assert_eq!(cpu.state.fpscr & (1 << 31), 0); // FX comes only from source bit 31
+    }
+
 
 }
