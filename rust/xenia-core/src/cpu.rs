@@ -948,10 +948,7 @@ impl PpcInterpreter {
                 for (register, value) in self.state.gpr.iter().enumerate().skip(rt_rs) {
                     let offset = ((register - rt_rs) as u32).wrapping_mul(4);
                     memory
-                        .write_u32_be(
-                            GuestAddress(address.wrapping_add(offset)),
-                            *value as u32,
-                        )
+                        .write_u32_be(GuestAddress(address.wrapping_add(offset)), *value as u32)
                         .map_err(Into::into)?;
                 }
                 self.state.pc = next_pc;
