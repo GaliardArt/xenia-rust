@@ -1938,7 +1938,7 @@ impl PpcInterpreter {
                         }
                         self.set_fx_for_new_exception_bits(previous_fpscr);
                         self.refresh_fpscr_fex();
-                        self.queue_fpscr_write_exception(pc);
+                        self.queue_fpscr_write_exception(pc, previous_fpscr);
                         if record {
                             self.copy_fpscr_to_cr1();
                         }
@@ -4824,6 +4824,34 @@ mod tests {
         );
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsfi
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX derived after VE is enabled
+    }
+
+    #[test]
+    fn mtfsf_setting_invalid_cause_and_enable_raises_fp_exception() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsf 0xFF,f2: write VXZDZ and VE in one FPSCR transfer.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (0xFF << 17) | (2 << 11) | (711 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::from_bits((1 << 21) | (1 << 7));
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                causes: (1 << 29) | (1 << 21),
+                mode: PpcFpExceptionMode::Precise,
+            })
+        );
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsf
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX recomputed from VX + VE
     }
 
     #[test]
