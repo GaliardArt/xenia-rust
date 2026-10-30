@@ -371,13 +371,17 @@ impl PpcInterpreter {
                 div_zero,
                 overflow,
                 underflow,
-                inexact: if overflow { !overflow_enabled } else { inexact },
+                inexact: if overflow && !overflow_enabled {
+                    true
+                } else {
+                    inexact
+                },
                 raise_inexact: if overflow && !overflow_enabled {
                     true
                 } else {
                     inexact
                 },
-                fraction_rounded: fraction_rounded && !overflow,
+                fraction_rounded: fraction_rounded && !(overflow && !overflow_enabled),
                 update_rounding,
                 invalid_cause,
             },
