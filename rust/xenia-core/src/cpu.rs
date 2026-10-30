@@ -1204,9 +1204,9 @@ impl PpcInterpreter {
                             } // fsel
                             22 => b.sqrt(), // fsqrt
                             24 => (1.0_f32 / (b as f32)) as f64, // fres (single estimate domain)
-                            26 => 1.0 / b.sqrt(),               // frsqrte
-                            29 => a.mul_add(c, b),              // fmadd
-                            28 => a.mul_add(c, -b),             // fmsub
+                            26 => 1.0 / b.sqrt(), // frsqrte
+                            29 => a.mul_add(c, b), // fmadd
+                            28 => a.mul_add(c, -b), // fmsub
                             31 => -a.mul_add(c, b),             // fnmadd
                             30 => -a.mul_add(c, -b),            // fnmsub
                             _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
