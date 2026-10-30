@@ -30,7 +30,7 @@ The long-term objective is to build toward Xbox 360 game execution while preserv
 
 ## Current status
 
-The rewrite is at an early foundation and audit stage. The presence of this repository or its original C++ source does **not** mean that the corresponding functionality has been implemented in Rust.
+The rewrite has completed its initial repository audit and is implementing the executable-loading foundation. The Rust workspace now includes checked guest memory, a small PPC interpreter subset, XEX2 and Xbox PE metadata parsing, and a restricted unencrypted/uncompressed XEX2 image path. This remains an early experimental foundation, not a playable emulator.
 
 | Area | Current direction |
 |---|---|
@@ -41,10 +41,10 @@ The rewrite is at an early foundation and audit stage. The presence of this repo
 | Xbox 360 kernel and system services | Reimplement required operating-system behavior as dependencies become clear |
 | Graphics and GPU | Analyze the graphics pipeline and plan a compatible Rust implementation |
 | Audio, storage, and input | Implement and validate subsystem support progressively |
-| Executable loading and game execution | Integrate only after the required foundations are available |
+| Executable loading and game execution | Initial unencrypted/uncompressed XEX2 image path is implemented; encrypted/compressed formats, mapping, imports, kernel boot, and execution remain open |
 | Compatibility and regression testing | Compare behavior against reference implementations and maintain targeted tests |
 
-**Not implemented yet:** a complete PowerPC CPU, functional Xbox 360 GPU, full kernel/system services, end-to-end game loading, or playable game support. The table describes the intended work, not completed features. Update this section as verified implementation milestones are reached.
+**Not implemented yet:** a complete PowerPC CPU, functional Xbox 360 GPU, full kernel/system services, complete XEX decryption/decompression, guest-memory mapping, imports, end-to-end boot, or playable game support. The implemented XEX path only validates and prepares an unencrypted/uncompressed image plan; it does not start execution.
 
 ## Development approach
 
