@@ -8,6 +8,10 @@ use core::cmp::Ordering;
 use crate::address_space::AddressSpaceError;
 use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
+/// PowerPC MSR floating-point exception mode bits (32-bit Xenon view).
+pub const PPC_MSR_FE0: u32 = 1 << 11;
+pub const PPC_MSR_FE1: u32 = 1 << 8;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PpcState {
     /// General-purpose registers. The Xenon PPC context uses 64-bit GPR storage.
@@ -16,6 +20,8 @@ pub struct PpcState {
     /// VMX128 register file. Each vector is stored in guest byte order.
     pub vr: [[u8; 16]; 128],
     pub pc: u32,
+    /// Machine State Register, represented in the 32-bit Xenon execution view.
+    pub msr: u32,
     pub lr: u64,
     pub ctr: u64,
     pub xer: u64,
@@ -31,6 +37,7 @@ impl Default for PpcState {
             fpr: [0.0; 32],
             vr: [[0; 16]; 128],
             pc: 0,
+            msr: 0,
             lr: 0,
             ctr: 0,
             xer: 0,
@@ -47,6 +54,8 @@ pub enum PpcError {
     AddressSpace(AddressSpaceError),
     UnsupportedInstruction { pc: u32, opcode: u32 },
     UnsupportedBranchOption { pc: u32, bo: u8 },
+    /// The caller must dispatch or explicitly consume this exception before stepping again.
+    PendingException(PpcException),
 }
 
 impl From<MemoryError> for PpcError {
@@ -262,7 +271,8 @@ impl PpcInterpreter {
         if exceptions.raise_inexact && self.state.fpscr & (1 << 3) != 0 {
             enabled_causes |= XX;
         }
-        if enabled_causes != 0 && self.pending_exception.is_none() {
+        let fp_exceptions_enabled_in_msr = self.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1) != 0;
+        if enabled_causes != 0 && fp_exceptions_enabled_in_msr && self.pending_exception.is_none() {
             self.pending_exception = Some(PpcException::FloatingPoint {
                 pc: self.state.pc,
                 causes: enabled_causes,
@@ -881,9 +891,11 @@ impl PpcInterpreter {
         M: GuestMemoryAccess,
         M::Error: Into<PpcError>,
     {
-        // The event belongs to exactly one instruction. A caller should
-        // inspect/consume it after each successful step, before stepping again.
-        self.pending_exception = None;
+        // Never discard a guest exception silently. The CPU loop must consume
+        // and dispatch it before another instruction can execute.
+        if let Some(exception) = self.pending_exception {
+            return Err(PpcError::PendingException(exception));
+        }
         let pc = self.state.pc;
         let instruction = memory.fetch_u32_be(GuestAddress(pc)).map_err(Into::into)?;
         let opcode = instruction >> 26;
@@ -3501,6 +3513,7 @@ mod tests {
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 4; // ZE enable
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -3820,6 +3833,7 @@ mod tests {
         cpu.state.fpr[2] = f32::MAX as f64;
         cpu.state.fpr[3] = f32::MAX as f64;
         cpu.state.fpscr = 1 << 6; // OE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -3883,6 +3897,7 @@ mod tests {
         cpu.state.fpr[5] = f64::from_bits(1);
         cpu.state.fpr[6] = 1.0;
         cpu.state.fpscr = 1 << 6; // OE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
@@ -3898,6 +3913,7 @@ mod tests {
 
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = 1 << 5; // UE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.take_pending_exception(),
@@ -3994,7 +4010,8 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x7FF0_0000_0000_0001);
         cpu.state.fpr[2] = 1.0;
-        cpu.state.fpscr = 1 << 7; // VE enabled
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode enabled
 
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
@@ -4084,6 +4101,7 @@ mod tests {
         cpu.state.fpr[1] = 99.0;
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -4607,7 +4625,8 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = 1 << 5; // UE enabled
+        cpu.state.fpscr = 1 << 5; // UE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode enabled
 
         cpu.step(&mut memory).unwrap();
 
@@ -4660,6 +4679,7 @@ mod tests {
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         let expected = PpcException::FloatingPoint {
             pc: 0x1000,
@@ -4669,6 +4689,52 @@ mod tests {
         assert_eq!(cpu.pending_exception(), Some(expected));
         assert_eq!(cpu.take_pending_exception(), Some(expected));
         assert_eq!(cpu.state.fpr[1], 123.0); // enabled invalid suppresses destination write
+    }
+
+    #[test]
+    fn fpscr_enabled_exception_is_not_dispatched_when_msr_fe_bits_are_clear() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fdiv f1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE enabled, but MSR[FE0:FE1] = 00
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.pending_exception(), None);
+        assert_ne!(cpu.state.fpscr & (1 << 29), 0); // sticky VX is still recorded
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FPSCR FEX still reflects VE + VX
+    }
+
+    #[test]
+    fn interpreter_does_not_drop_an_unconsumed_fp_exception_on_next_step() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fdiv f1,f2,f3; nop-like supported addi r0,r0,0
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+
+        cpu.step(&mut memory).unwrap();
+        let pending = cpu.pending_exception().expect("enabled FP exception");
+        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(cpu.state.pc, 0x1004);
+        assert_eq!(cpu.pending_exception(), Some(pending));
     }
 
     #[test]
@@ -4704,6 +4770,7 @@ mod tests {
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0_f64.powi(-24);
         cpu.state.fpscr = 1 << 3; // XE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -4733,6 +4800,7 @@ mod tests {
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpr[3] = 1.0;
         cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
