@@ -87,7 +87,9 @@ impl PpcInterpreter {
         const SO: u64 = 1 << 31;
         const OV: u64 = 1 << 30;
         self.state.xer &= !OV;
-        if overflow { self.state.xer |= OV | SO; }
+        if overflow {
+            self.state.xer |= OV | SO;
+        }
     }
 
     fn set_carry(&mut self, carry: bool) {
@@ -98,8 +100,11 @@ impl PpcInterpreter {
     fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
         let field = bit_index / 4;
         let mask = 1 << (3 - (bit_index % 4));
-        if value { self.state.cr[field] |= mask; }
-        else { self.state.cr[field] &= !mask; }
+        if value {
+            self.state.cr[field] |= mask;
+        } else {
+            self.state.cr[field] &= !mask;
+        }
     }
 
     /// Fetches and executes one big-endian 32-bit instruction.
@@ -295,14 +300,22 @@ impl PpcInterpreter {
                     266 | 778 | 40 | 552 | 10 | 522 | 138 | 650 | 8 | 520 | 136 | 648 => {
                         let (value, carry, overflow) = match xo {
                             266 | 10 | 138 => {
-                                let carry_in = if xo == 138 && self.state.xer & (1 << 29) != 0 { 1_u64 } else { 0 };
+                                let carry_in = if xo == 138 && self.state.xer & (1 << 29) != 0 {
+                                    1_u64
+                                } else {
+                                    0
+                                };
                                 let (partial, c1) = left.overflowing_add(right);
                                 let (value, c2) = partial.overflowing_add(carry_in);
                                 let overflow = ((!(left ^ right) & (left ^ value)) >> 63) != 0;
                                 (value, c1 || c2, overflow)
                             }
                             40 | 8 | 136 => {
-                                let borrow_in = if xo == 136 && self.state.xer & (1 << 29) != 0 { 0_u64 } else { 1_u64 };
+                                let borrow_in = if xo == 136 && self.state.xer & (1 << 29) != 0 {
+                                    0_u64
+                                } else {
+                                    1_u64
+                                };
                                 let (partial, b1) = right.overflowing_sub(left);
                                 let (value, b2) = partial.overflowing_sub(borrow_in);
                                 let overflow = (((right ^ left) & (right ^ value)) >> 63) != 0;
@@ -311,16 +324,26 @@ impl PpcInterpreter {
                             _ => unreachable!(),
                         };
                         self.state.gpr[rt_rs] = value;
-                        if oe { self.update_overflow(overflow); }
-                        if xo == 10 || xo == 8 || xo == 138 || xo == 136 { self.set_carry(carry); }
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if oe {
+                            self.update_overflow(overflow);
+                        }
+                        if xo == 10 || xo == 8 || xo == 138 || xo == 136 {
+                            self.set_carry(carry);
+                        }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     104 | 616 => {
                         let value = self.state.gpr[ra].wrapping_neg();
                         let overflow = self.state.gpr[ra] == (1_u64 << 63);
                         self.state.gpr[rt_rs] = value;
-                        if oe { self.update_overflow(overflow); }
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if oe {
+                            self.update_overflow(overflow);
+                        }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     235 | 747 => {
                         let a = self.state.gpr[ra] as u32 as i32 as i64;
@@ -330,11 +353,21 @@ impl PpcInterpreter {
                         let overflow = product != (product as i32 as i64);
                         self.state.gpr[rt_rs] = value;
                         if oe { self.update_overflow(overflow); }
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     11 | 75 => {
-                        let a = if xo == 75 { self.state.gpr[ra] as u32 as i32 as i64 } else { self.state.gpr[ra] as u32 as u64 as i64 };
-                        let b = if xo == 75 { self.state.gpr[rb] as u32 as i32 as i64 } else { self.state.gpr[rb] as u32 as u64 as i64 };
+                        let a = if xo == 75 {
+                            self.state.gpr[ra] as u32 as i32 as i64
+                        } else {
+                            self.state.gpr[ra] as u32 as u64 as i64
+                        };
+                        let b = if xo == 75 {
+                            self.state.gpr[rb] as u32 as i32 as i64
+                        } else {
+                            self.state.gpr[rb] as u32 as u64 as i64
+                        };
                         let value = ((a * b) >> 32) as u64;
                         self.state.gpr[rt_rs] = value;
                         if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
@@ -343,13 +376,19 @@ impl PpcInterpreter {
                         let dividend = self.state.gpr[ra] as u32;
                         let divisor = self.state.gpr[rb] as u32;
                         let signed = xo == 491;
-                        let (value, overflow) = if divisor == 0 { (0, true) }
-                        else if signed {
+                        let (value, overflow) = if divisor == 0 {
+                            (0, true)
+                        } else if signed {
                             let a = dividend as i32;
                             let b = divisor as i32;
-                            if a == i32::MIN && b == -1 { (0, true) }
-                            else { ((a / b) as u32 as u64, false) }
-                        } else { ((dividend / divisor) as u64, false) };
+                            if a == i32::MIN && b == -1 {
+                                (0, true)
+                            } else {
+                                ((a / b) as u32 as u64, false)
+                            }
+                        } else {
+                            ((dividend / divisor) as u64, false)
+                        };
                         self.state.gpr[rt_rs] = value;
                         if oe { self.update_overflow(overflow); }
                         if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
@@ -679,9 +718,17 @@ mod tests {
     fn addc_and_subfc_update_carry_and_record_result() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addc r5,r3,r4
-        put_instruction(&mut memory, 0x1000, (31 << 26) | (5 << 21) | (3 << 16) | (4 << 11) | (10 << 1));
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (5 << 21) | (3 << 16) | (4 << 11) | (10 << 1),
+        );
         // subfc r6,r3,r4 => r4-r3
-        put_instruction(&mut memory, 0x1004, (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (8 << 1));
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (8 << 1),
+        );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = u64::MAX;
@@ -700,7 +747,11 @@ mod tests {
     fn condition_register_logic_updates_individual_bits() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // crand bt=3, ba=2, bb=1
-        put_instruction(&mut memory, 0x1000, (19 << 26) | (3 << 21) | (2 << 16) | (1 << 11) | (257 << 1));
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (19 << 26) | (3 << 21) | (2 << 16) | (1 << 11) | (257 << 1),
+        );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.cr[0] = 0b1100;
