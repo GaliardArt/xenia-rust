@@ -1248,7 +1248,7 @@ impl PpcInterpreter {
                     146 => {
                         // The 32-bit Xenon MSR model implements L=0. L=1
                         // selects the distinct 64-bit MSR update form.
-                        if instruction & (1 << 16) != 0 {
+                        if instruction & 0x001F_0000 != 0 {
                             return Err(PpcError::UnsupportedInstruction { pc, opcode });
                         }
 
