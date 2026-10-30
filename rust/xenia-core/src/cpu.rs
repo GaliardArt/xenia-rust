@@ -190,8 +190,8 @@ impl PpcInterpreter {
         const UX: u32 = 1 << 27;
         const ZX: u32 = 1 << 26;
         const XX: u32 = 1 << 25;
-        const FR: u32 = 1 << 15;
-        const FI: u32 = 1 << 14;
+        const FR: u32 = 1 << 18;
+        const FI: u32 = 1 << 17;
 
         if exceptions.update_rounding {
             self.state.fpscr &= !(FR | FI);
@@ -3008,7 +3008,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert!(cpu.state.fpr[1].is_nan());
-        assert_eq!(cpu.state.fpscr & ((1 << 14) | (1 << 25)), 0);
+        assert_eq!(cpu.state.fpscr & ((1 << 17) | (1 << 25)), 0);
 
         // A signaling NaN can be quieted by the binary32 operand conversion,
         // but VXSNAN must still be raised from the original FPR bit pattern.
@@ -3018,7 +3018,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
-        assert_eq!(cpu.state.fpscr & ((1 << 14) | (1 << 25)), 0);
+        assert_eq!(cpu.state.fpscr & ((1 << 17) | (1 << 25)), 0);
     }
 
     #[test]
@@ -3038,17 +3038,17 @@ mod tests {
         // Nearest-even retains 1.0, but the discarded addend is inexact.
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], 1.0);
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
-        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded down
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // FR: rounded down
 
         // Toward +infinity must advance to the next representable binary64.
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1].to_bits(), 1.0_f64.to_bits() + 1);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded up
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: rounded up
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
     }
 
     #[test]
@@ -3179,15 +3179,15 @@ mod tests {
         cpu.state.fpscr = 0;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], 9_007_199_254_740_992.0);
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
-        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // rounded toward zero
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // rounded toward zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], 9_007_199_254_740_994.0);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
     }
 
     #[test]
@@ -3238,8 +3238,8 @@ mod tests {
             | (1 << 26)
             | (1 << 25)
             | (1 << 24)
-            | (1 << 15)
-            | (1 << 14)
+            | (1 << 18)
+            | (1 << 17)
             | 0x0000_4000
             | (1 << 7); // VE enables FEX while VXSNAN is pending.
 
@@ -3251,7 +3251,7 @@ mod tests {
         assert_eq!(cpu.state.cr[1], 0x0F); // original UX/ZX/XX/VXSNAN
         assert_eq!(cpu.state.cr[2], 0x0C); // FR/FI are copied, not cleared
         assert_eq!(cpu.state.fpscr & ((1 << 30) | (1 << 29)), 0); // summaries recomputed
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), (1 << 15) | (1 << 14));
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), (1 << 18) | (1 << 17));
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF preserved
     }
 
@@ -3379,12 +3379,12 @@ mod tests {
         cpu.state.fpr[2] = 1.0;
         // Comparisons update FPRF and invalid causes, but preserve the
         // rounding status left by the preceding arithmetic instruction.
-        cpu.state.fpscr = (1 << 15) | (1 << 14);
+        cpu.state.fpscr = (1 << 18) | (1 << 17);
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
-            cpu.state.fpscr & ((1 << 15) | (1 << 14)),
-            (1 << 15) | (1 << 14)
+            cpu.state.fpscr & ((1 << 18) | (1 << 17)),
+            (1 << 18) | (1 << 17)
         );
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
@@ -3430,7 +3430,7 @@ mod tests {
             cpu.state.fpr[1].to_bits(),
             (f32::from_bits(0xBF80_0001) as f64).to_bits()
         );
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: rounded away from zero.
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: rounded away from zero.
 
         // A finite binary64 value that overflows binary32 must still obey
         // directed rounding instead of unconditionally becoming infinity.
@@ -3446,7 +3446,7 @@ mod tests {
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: overflow rounded away from zero
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: overflow rounded away from zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -f64::MAX;
@@ -3469,13 +3469,13 @@ mod tests {
         cpu.state.fpr[1] = 99.0;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000; // ZE, FR, FI, FPRF
+        cpu.state.fpscr = (1 << 4) | (1 << 18) | (1 << 17) | 0x0000_4000; // ZE, FR, FI, FPRF
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 99.0);
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF unchanged
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0); // FR/FI cleared
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
         assert_ne!(cpu.state.cr[1], 0); // CR1 summary
@@ -3501,20 +3501,20 @@ mod tests {
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 20.0;
         cpu.state.fpr[4] = -0.0;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000; // ZE + status
+        cpu.state.fpscr = (1 << 4) | (1 << 18) | (1 << 17) | 0x0000_4000; // ZE + status
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], 10.0);
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0);
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
 
         cpu.state.pc = 0x1004;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000;
+        cpu.state.fpscr = (1 << 4) | (1 << 18) | (1 << 17) | 0x0000_4000;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[3], 20.0);
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0);
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
     }
 
@@ -3530,12 +3530,12 @@ mod tests {
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 4.0;
-        cpu.state.fpscr = (1 << 15) | (1 << 14);
+        cpu.state.fpscr = (1 << 18) | (1 << 17);
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 0.5);
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), (1 << 15) | (1 << 14));
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), (1 << 18) | (1 << 17));
         assert_eq!(cpu.state.fpscr & (1 << 26), 0); // no ZX
     }
 
@@ -3594,7 +3594,7 @@ mod tests {
         let expected = (1.0 / cpu.state.fpr[2]) as f32 as f64;
         assert_eq!(cpu.state.fpr[1], expected);
         assert_ne!(cpu.state.fpr[1], 1.0);
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX is sticky FI
     }
 
@@ -3665,7 +3665,7 @@ mod tests {
         assert!(cpu.state.fpr[1] > 0.0);
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0); // FR/FI cleared
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // positive normal
     }
 
@@ -3689,7 +3689,7 @@ mod tests {
         assert_eq!(cpu.state.fpr[1], 2.0_f64.powi(43));
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0);
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // positive normal
     }
 
@@ -3747,13 +3747,13 @@ mod tests {
         assert_eq!(cpu.state.fpr[1].to_bits(), 0);
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1].to_bits(), 1);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
     }
 
@@ -3776,26 +3776,26 @@ mod tests {
         assert_eq!(cpu.state.fpr[1], f64::MAX);
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
-        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // not rounded away from zero
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // not rounded away from zero
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10; // toward +infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR
 
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -f64::MAX;
         cpu.state.fpscr = 0b10; // toward +infinity: negative magnitude decreases
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], -f64::MAX);
-        assert_eq!(cpu.state.fpscr & (1 << 15), 0);
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0);
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b11; // toward -infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::NEG_INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0);
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0);
     }
 
     #[test]
@@ -3880,7 +3880,7 @@ mod tests {
 
         assert_eq!(cpu.state.fpr[1], 42.0); // enabled invalid operation suppresses FPR write
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF unchanged
-        assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0); // FR/FI cleared
         assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
@@ -4098,13 +4098,13 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1].to_bits(), 0x1234_5678_0000_0003);
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI
-        assert_ne!(cpu.state.fpscr & (1 << 15), 0); // FR: 2.75 rounded to 3
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: 2.75 rounded to 3
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[3].to_bits(), 0x8765_4321_0000_0002);
-        assert_ne!(cpu.state.fpscr & (1 << 14), 0); // FI: fractional bits were discarded
-        assert_eq!(cpu.state.fpscr & (1 << 15), 0); // fctiwz truncates toward zero
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI: fractional bits were discarded
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // fctiwz truncates toward zero
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX: conversion was inexact
         assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX: sticky exception summary
     }
