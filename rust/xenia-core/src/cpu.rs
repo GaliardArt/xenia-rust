@@ -240,7 +240,11 @@ impl PpcInterpreter {
             value.is_subnormal()
         };
         let class = if value.is_nan() {
-            if Self::is_signaling_nan(value) { 0x00 } else { 0x11 }
+            if Self::is_signaling_nan(value) {
+                0x00
+            } else {
+                0x11
+            }
         } else if value.is_infinite() {
             if value.is_sign_negative() { 0x09 } else { 0x05 }
         } else if value == 0.0 {
@@ -259,8 +263,7 @@ impl PpcInterpreter {
         // Compare instructions update the four-bit FPCC field, not the
         // separate FPRF class bit C.
         const FPCC_MASK: u32 = 0x0000_F000;
-        self.state.fpscr =
-            (self.state.fpscr & !FPCC_MASK) | (((condition as u32) & 0x0F) << 12);
+        self.state.fpscr = (self.state.fpscr & !FPCC_MASK) | (((condition as u32) & 0x0F) << 12);
     }
 
     fn is_signaling_nan(value: f64) -> bool {
@@ -297,9 +300,7 @@ impl PpcInterpreter {
             18 if operands.len() >= 2 && operands[0] == 0.0 && operands[1] == 0.0 => {
                 invalid_cause |= 1 << 21; // VXZDZ
             }
-            18 if operands.len() >= 2
-                && operands[0].is_infinite()
-                && operands[1].is_infinite() =>
+            18 if operands.len() >= 2 && operands[0].is_infinite() && operands[1].is_infinite() =>
             {
                 invalid_cause |= 1 << 22; // VXIDI
             }
@@ -323,17 +324,19 @@ impl PpcInterpreter {
             {
                 invalid_cause |= 1 << 20; // VXIMZ
             }
-            28..=31 if operands.len() >= 3
-                && ((operands[0].is_infinite() && operands[2] == 0.0)
-                    || (operands[2].is_infinite() && operands[0] == 0.0)) =>
+            28..=31
+                if operands.len() >= 3
+                    && ((operands[0].is_infinite() && operands[2] == 0.0)
+                        || (operands[2].is_infinite() && operands[0] == 0.0)) =>
             {
                 invalid_cause |= 1 << 20; // VXIMZ
             }
-            28..=31 if operands.len() >= 3
-                && (operands[0].is_infinite() || operands[2].is_infinite())
-                && operands[1].is_infinite()
-                && ((operands[0].is_sign_negative() ^ operands[2].is_sign_negative())
-                    != (operands[1].is_sign_negative() ^ matches!(operation, 28 | 30))) =>
+            28..=31
+                if operands.len() >= 3
+                    && (operands[0].is_infinite() || operands[2].is_infinite())
+                    && operands[1].is_infinite()
+                    && ((operands[0].is_sign_negative() ^ operands[2].is_sign_negative())
+                        != (operands[1].is_sign_negative() ^ matches!(operation, 28 | 30))) =>
             {
                 invalid_cause |= 1 << 23; // VXISI
             }
@@ -343,9 +346,7 @@ impl PpcInterpreter {
             _ => {}
         }
 
-        let invalid = signaling_nan
-            || invalid_cause != 0
-            || (value.is_nan() && !has_nan_operand);
+        let invalid = signaling_nan || invalid_cause != 0 || (value.is_nan() && !has_nan_operand);
         // ZX is specific to division/reciprocal operations. A zero
         // second operand in add, subtract, multiply, or fused operations is
         // ordinary arithmetic and must not raise divide-by-zero.
@@ -551,10 +552,8 @@ impl PpcInterpreter {
                 28..=31 => a.is_finite() && b.is_finite() && c.is_finite(),
                 _ => false,
             };
-            let divide_by_zero = matches!(operation, 18 | 24 | 26)
-                && b == 0.0
-                && a != 0.0
-                && a.is_finite();
+            let divide_by_zero =
+                matches!(operation, 18 | 24 | 26) && b == 0.0 && a != 0.0 && a.is_finite();
             if !operands_finite || divide_by_zero {
                 return (result, false, false, false);
             }
@@ -562,7 +561,11 @@ impl PpcInterpreter {
             let adjusted = match self.fpscr_rounding_mode() {
                 0 => result,
                 1 => {
-                    if negative { -f64::MAX } else { f64::MAX }
+                    if negative {
+                        -f64::MAX
+                    } else {
+                        f64::MAX
+                    }
                 }
                 2 if negative => -f64::MAX,
                 3 if !negative => f64::MAX,
@@ -595,9 +598,7 @@ impl PpcInterpreter {
         let residual = match operation {
             21 => Self::two_sum_error(a, b, result),
             20 => Self::two_sum_error(a, -b, result),
-            18 if b != 0.0 && a.is_finite() && b.is_finite() => {
-                (-result).mul_add(b, a) / b
-            }
+            18 if b != 0.0 && a.is_finite() && b.is_finite() => (-result).mul_add(b, a) / b,
             25 => a.mul_add(c, -result),
             22 if b >= 0.0 => (-result).mul_add(result, b),
             28..=31 => {
@@ -608,9 +609,8 @@ impl PpcInterpreter {
                 let product_error = a.mul_add(c, -product);
                 let sum = product + addend;
                 let sum_error = Self::two_sum_error(product, addend, sum);
-                let compensated = (sum - if negate { -result } else { result })
-                    + product_error
-                    + sum_error;
+                let compensated =
+                    (sum - if negate { -result } else { result }) + product_error + sum_error;
                 if negate { -compensated } else { compensated }
             }
             _ => 0.0,
@@ -665,8 +665,7 @@ impl PpcInterpreter {
                     (a, Self::scale_by_power_of_two(b, -1536))
                 };
                 let intermediate = scaled_a / scaled_b;
-                let rounded =
-                    self.round_binary64_result(18, scaled_a, scaled_b, 0.0, intermediate);
+                let rounded = self.round_binary64_result(18, scaled_a, scaled_b, 0.0, intermediate);
                 (rounded.0, rounded.1, rounded.2)
             }
             25 => {
@@ -676,8 +675,7 @@ impl PpcInterpreter {
                     (a, Self::scale_by_power_of_two(c, 1536))
                 };
                 let intermediate = scaled_a * scaled_c;
-                let rounded =
-                    self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
+                let rounded = self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
                 (rounded.0, rounded.1, rounded.2)
             }
             28..=31 if b == 0.0 => {
@@ -1030,8 +1028,7 @@ impl PpcInterpreter {
                                 } else {
                                     0
                                 };
-                                self.state.fpr[rt_rs] =
-                                    f64::from_bits(upper | word as u64);
+                                self.state.fpr[rt_rs] = f64::from_bits(upper | word as u64);
                             }
                             887 => {
                                 let word = memory
@@ -1614,8 +1611,7 @@ impl PpcInterpreter {
                     memory
                         .write_u32_be(
                             GuestAddress(address),
-                            Self::narrow_single_preserving_nan(self.state.fpr[rt_rs])
-                                .to_bits(),
+                            Self::narrow_single_preserving_nan(self.state.fpr[rt_rs]).to_bits(),
                         )
                         .map_err(Into::into)?;
                 } else {
@@ -1704,11 +1700,11 @@ impl PpcInterpreter {
                         self.state.cr[crfd] = field;
                         let clear_mask = match crfs {
                             0 => (1 << 31) | (1 << 28), // FX and OX; FEX/VX are summaries.
-                            1 => 0x0F00_0000,          // UX, ZX, XX, VXSNAN.
-                            2 => 0x00F0_0000,          // VXISI, VXIDI, VXZDZ, VXIMZ.
+                            1 => 0x0F00_0000,           // UX, ZX, XX, VXSNAN.
+                            2 => 0x00F0_0000,           // VXISI, VXIDI, VXZDZ, VXIMZ.
                             3 => (1 << 19) | (1 << 18) | (1 << 17), // VXVC, FR, FI.
-                            5 => 0x0000_0700,          // VXSOFT, VXSQRT, VXCVI.
-                            _ => 0,                   // Non-exception status/control fields.
+                            5 => 0x0000_0700,           // VXSOFT, VXSQRT, VXCVI.
+                            _ => 0,                     // Non-exception status/control fields.
                         };
                         self.state.fpscr &= !clear_mask;
                         self.refresh_fpscr_fex();
@@ -1778,7 +1774,8 @@ impl PpcInterpreter {
 
                 if xo10 == 583 {
                     // mffs
-                    self.state.fpr[frt] = f64::from_bits(0xFFF8_0000_0000_0000 | self.state.fpscr as u64);
+                    self.state.fpr[frt] =
+                        f64::from_bits(0xFFF8_0000_0000_0000 | self.state.fpscr as u64);
                     if record {
                         self.copy_fpscr_to_cr1();
                     }
@@ -1865,8 +1862,7 @@ impl PpcInterpreter {
                         update_status = true;
                         frsp_overflow = b.is_finite() && b.abs() > f32::MAX as f64;
                         let tiny = b != 0.0 && b.abs() < f32::MIN_POSITIVE as f64;
-                        let overflow_enabled =
-                            frsp_overflow && self.state.fpscr & (1 << 6) != 0;
+                        let overflow_enabled = frsp_overflow && self.state.fpscr & (1 << 6) != 0;
                         let underflow_enabled = tiny && self.state.fpscr & (1 << 5) != 0;
                         let adjusted_value = if overflow_enabled {
                             Self::scale_by_power_of_two(b, -192)
@@ -1886,7 +1882,11 @@ impl PpcInterpreter {
                             && rounded != 0.0
                             && rounded.abs() < f32::MIN_POSITIVE as f64;
                         if ni_flush {
-                            rounded = if rounded.is_sign_negative() { -0.0 } else { 0.0 };
+                            rounded = if rounded.is_sign_negative() {
+                                -0.0
+                            } else {
+                                0.0
+                            };
                         }
                         frsp_inexact = ni_flush
                             || if adjusted {
@@ -1922,21 +1922,13 @@ impl PpcInterpreter {
                             self.state.fpscr |= 1 << 8; // VXCVI
                             let negative_or_nan = rounded.is_nan() || rounded < min;
                             if xo10 == 14 || xo10 == 15 {
-                                let integer = if negative_or_nan {
-                                    i32::MIN
-                                } else {
-                                    i32::MAX
-                                };
+                                let integer = if negative_or_nan { i32::MIN } else { i32::MAX };
                                 f64::from_bits(
                                     (self.state.fpr[frt].to_bits() & 0xFFFF_FFFF_0000_0000)
                                         | (integer as u32 as u64),
                                 )
                             } else {
-                                let integer = if negative_or_nan {
-                                    i64::MIN
-                                } else {
-                                    i64::MAX
-                                };
+                                let integer = if negative_or_nan { i64::MIN } else { i64::MAX };
                                 f64::from_bits(integer as u64)
                             }
                         } else {
@@ -1998,8 +1990,7 @@ impl PpcInterpreter {
                     double_fraction_rounded = rounded.2;
                     double_overflow = rounded.3;
                     if double_overflow && self.state.fpscr & (1 << 6) != 0 {
-                        let adjusted =
-                            self.round_double_overflow_enabled(xo5, a, b, c);
+                        let adjusted = self.round_double_overflow_enabled(xo5, a, b, c);
                         value = adjusted.0;
                         double_inexact = adjusted.1;
                         double_fraction_rounded = adjusted.2;
@@ -2016,11 +2007,9 @@ impl PpcInterpreter {
                         double_inexact = true;
                         double_fraction_rounded = false;
                     }
-                    double_underflow =
-                        double_tiny && (underflow_enabled || double_inexact);
+                    double_underflow = double_tiny && (underflow_enabled || double_inexact);
                     if double_underflow && underflow_enabled {
-                        let adjusted =
-                            self.round_double_underflow_enabled(xo5, a, b, c, value);
+                        let adjusted = self.round_double_underflow_enabled(xo5, a, b, c, value);
                         value = adjusted.0;
                         if matches!(xo5, 18 | 25) || (matches!(xo5, 28..=31) && b == 0.0) {
                             double_inexact = adjusted.1;
@@ -2953,16 +2942,8 @@ mod tests {
     fn single_precision_load_and_store_preserve_signaling_nan_payloads() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // lfs f1,4(r3); stfs f1,12(r3)
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (48 << 26) | (1 << 21) | (3 << 16) | 4,
-        );
-        put_instruction(
-            &mut memory,
-            0x1008,
-            (52 << 26) | (1 << 21) | (3 << 16) | 12,
-        );
+        put_instruction(&mut memory, 0x1000, (48 << 26) | (1 << 21) | (3 << 16) | 4);
+        put_instruction(&mut memory, 0x1008, (52 << 26) | (1 << 21) | (3 << 16) | 12);
         memory
             .write_u32_be(GuestAddress(0x1004), 0x7F80_0001)
             .unwrap();
@@ -3151,11 +3132,7 @@ mod tests {
     fn mffs_and_mtfsf_transfer_the_raw_fpscr_word() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // mffs f1; mtfsf 0xFF,f1
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (63 << 26) | (1 << 21) | (583 << 1),
-        );
+        put_instruction(&mut memory, 0x1000, (63 << 26) | (1 << 21) | (583 << 1));
         put_instruction(
             &mut memory,
             0x1004,
@@ -3228,8 +3205,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
         let encode_mcrfs =
             |crfd: u32, crfs: u32| (63 << 26) | (crfd << 23) | (crfs << 18) | (64 << 1);
-        let encode_mtfsb =
-            |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
+        let encode_mtfsb = |bit: u32, xo: u32| (63 << 26) | (bit << 21) | (xo << 1);
         put_instruction(&mut memory, 0x1000, encode_mcrfs(0, 0));
         put_instruction(&mut memory, 0x1004, encode_mtfsb(1, 70)); // cannot clear FEX
         put_instruction(&mut memory, 0x1008, encode_mtfsb(2, 70)); // cannot clear VX
@@ -3270,11 +3246,7 @@ mod tests {
     fn mcrfs_field_five_clears_all_low_invalid_causes() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mcrfs cr0, FPSCR field 5
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (63 << 26) | (5 << 18) | (64 << 1),
-        );
+        put_instruction(&mut memory, 0x1000, (63 << 26) | (5 << 18) | (64 << 1));
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = (1 << 10) | (1 << 9) | (1 << 8); // VXSOFT, VXSQRT, VXCVI
@@ -3584,7 +3556,10 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 0.5);
-        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), (1 << 18) | (1 << 17));
+        assert_eq!(
+            cpu.state.fpscr & ((1 << 18) | (1 << 17)),
+            (1 << 18) | (1 << 17)
+        );
         assert_eq!(cpu.state.fpscr & (1 << 26), 0); // no ZX
     }
 
@@ -3991,12 +3966,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         // fmadd f1,f2,f3,f4; fmadd f5,f2,f3,f6; fmadd f9,f2,f3,f7
         let fmadd = |frt: u32, fra: u32, frb: u32, frc: u32| {
-            (63 << 26)
-                | (frt << 21)
-                | (fra << 16)
-                | (frb << 11)
-                | (frc << 6)
-                | (29 << 1)
+            (63 << 26) | (frt << 21) | (fra << 16) | (frb << 11) | (frc << 6) | (29 << 1)
         };
         put_instruction(&mut memory, 0x1000, fmadd(1, 2, 4, 3));
         put_instruction(&mut memory, 0x1004, fmadd(5, 2, 6, 3));
@@ -4097,9 +4067,8 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
         );
-        let encode_x = |frt: u32, xo: u32| {
-            (31 << 26) | (frt << 21) | (3 << 16) | (4 << 11) | (xo << 1)
-        };
+        let encode_x =
+            |frt: u32, xo: u32| (31 << 26) | (frt << 21) | (3 << 16) | (4 << 11) | (xo << 1);
         put_instruction(&mut memory, 0x1004, encode_x(1, 983));
         put_instruction(&mut memory, 0x1008, encode_x(5, 855));
         put_instruction(&mut memory, 0x100C, encode_x(6, 887));
