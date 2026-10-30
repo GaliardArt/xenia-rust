@@ -917,7 +917,11 @@ impl PpcInterpreter {
                 self.state.pc = next_pc;
             }
             47 => {
-                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let base = if ra == 0 {
+                    0
+                } else {
+                    self.state.gpr[ra] as u32
+                };
                 let address = base.wrapping_add(immediate as u32);
                 for register in rt_rs..32 {
                     let offset = ((register - rt_rs) as u32).wrapping_mul(4);
