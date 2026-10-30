@@ -2123,7 +2123,7 @@ impl PpcInterpreter {
                                     && !divide_by_zero
                                     && operands.iter().all(|operand| operand.is_finite()))
                         };
-                        let underflow = tiny && inexact;
+                        let underflow = tiny && (underflow_enabled || inexact);
                         let invalid_enabled = self.update_fpscr_for_result(
                             rounded,
                             operands,
@@ -4516,7 +4516,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_single_precision_subnormal_does_not_raise_underflow_when_ue_is_enabled() {
+    fn exact_single_precision_subnormal_does_not_raise_underflow_when_ue_is_disabled() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // fadds f1,f2,f3
         put_instruction(
@@ -4528,7 +4528,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = 1 << 5; // UE enabled
+        cpu.state.fpscr = 0; // UE disabled
 
         cpu.step(&mut memory).unwrap();
 
