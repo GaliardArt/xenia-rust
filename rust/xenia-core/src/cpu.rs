@@ -1985,8 +1985,9 @@ impl PpcInterpreter {
                         double_inexact = adjusted.1;
                         double_fraction_rounded = adjusted.2;
                     }
-                    let double_tiny =
-                        value.is_subnormal() || (value == 0.0 && double_inexact);
+                    let double_tiny = value.is_subnormal()
+                        || (value == 0.0 && double_inexact)
+                        || (value.abs() == f64::MIN_POSITIVE && double_fraction_rounded);
                     double_underflow = double_tiny
                         && ((self.state.fpscr & (1 << 5) != 0) || double_inexact);
                     if double_underflow && self.state.fpscr & (1 << 5) != 0 {
