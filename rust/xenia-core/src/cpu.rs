@@ -86,12 +86,26 @@ struct FpExceptionFlags {
     invalid_cause: u32,
 }
 
-/// A guest-visible floating-point exception awaiting CPU-layer dispatch.
-/// The CPU/exception-dispatch layer consumes this event and performs the
-/// platform-specific program-exception entry sequence.
+/// Interpretation of MSR[FE0:FE1] for floating-point enabled exceptions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PpcFpExceptionMode {
+    Disabled,
+    ImpreciseNonRecoverable,
+    ImpreciseRecoverable,
+    Precise,
+}
+
+/// A guest-visible floating-point exception awaiting CPU-layer handling.
+///
+/// `instruction_pc` identifies the instruction that first raised the event;
+/// in imprecise modes it is not necessarily the architecturally saved SRR0.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PpcException {
-    FloatingPoint { pc: u32, causes: u32 },
+    FloatingPoint {
+        instruction_pc: u32,
+        causes: u32,
+        mode: PpcFpExceptionMode,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -101,13 +115,27 @@ pub struct PpcInterpreter {
 }
 
 impl PpcInterpreter {
-    /// Removes the pending guest exception so the outer CPU can dispatch it.
+    /// Decodes the four architecturally distinct MSR[FE0:FE1] modes.
+    pub fn fp_exception_mode(&self) -> PpcFpExceptionMode {
+        match (
+            self.state.msr & PPC_MSR_FE0 != 0,
+            self.state.msr & PPC_MSR_FE1 != 0,
+        ) {
+            (false, false) => PpcFpExceptionMode::Disabled,
+            (false, true) => PpcFpExceptionMode::ImpreciseNonRecoverable,
+            (true, false) => PpcFpExceptionMode::ImpreciseRecoverable,
+            (true, true) => PpcFpExceptionMode::Precise,
+        }
+    }
+
+    /// Removes the pending guest exception notification for CPU-layer handling.
     pub fn take_pending_exception(&mut self) -> Option<PpcException> {
         self.pending_exception.take()
     }
 
     /// Inspects the unconsumed guest exception event.
-    /// The CPU loop should consume it after each successful step.
+    /// Precise events stop execution; imprecise events must be held until a
+    /// guest synchronization point by the eventual CPU dispatcher.
     pub fn pending_exception(&self) -> Option<PpcException> {
         self.pending_exception
     }
@@ -271,11 +299,15 @@ impl PpcInterpreter {
         if exceptions.raise_inexact && self.state.fpscr & (1 << 3) != 0 {
             enabled_causes |= XX;
         }
-        let fp_exceptions_enabled_in_msr = self.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1) != 0;
-        if enabled_causes != 0 && fp_exceptions_enabled_in_msr && self.pending_exception.is_none() {
+        let fp_exception_mode = self.fp_exception_mode();
+        if enabled_causes != 0
+            && fp_exception_mode != PpcFpExceptionMode::Disabled
+            && self.pending_exception.is_none()
+        {
             self.pending_exception = Some(PpcException::FloatingPoint {
-                pc: self.state.pc,
+                instruction_pc: self.state.pc,
                 causes: enabled_causes,
+                mode: fp_exception_mode,
             });
         }
 
@@ -893,7 +925,11 @@ impl PpcInterpreter {
     {
         // Never discard a guest exception silently. The CPU loop must consume
         // and dispatch it before another instruction can execute.
-        if let Some(exception) = self.pending_exception {
+        if let Some(exception @ PpcException::FloatingPoint {
+            mode: PpcFpExceptionMode::Precise,
+            ..
+        }) = self.pending_exception
+        {
             return Err(PpcError::PendingException(exception));
         }
         let pc = self.state.pc;
@@ -3520,8 +3556,9 @@ mod tests {
         assert_eq!(
             cpu.take_pending_exception(),
             Some(PpcException::FloatingPoint {
-                pc: 0x1000,
+                instruction_pc: 0x1000,
                 causes: 1 << 26, // ZX
+                mode: PpcFpExceptionMode::Precise,
             })
         );
         assert_eq!(cpu.state.fpr[1], 10.0); // enabled exception suppresses destination write
@@ -3842,6 +3879,7 @@ mod tests {
             Some(PpcException::FloatingPoint {
                 pc: 0x1000,
                 causes: 1 << 28, // OX
+                mode: PpcFpExceptionMode::Precise,
             })
         );
         assert!(cpu.state.fpr[1].is_finite());
@@ -3920,6 +3958,7 @@ mod tests {
             Some(PpcException::FloatingPoint {
                 pc: 0x1004,
                 causes: 1 << 27, // UX
+                mode: PpcFpExceptionMode::Precise,
             })
         );
         assert_eq!(cpu.state.fpr[4], 2.0_f64.powi(462));
@@ -4682,13 +4721,60 @@ mod tests {
         cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
 
         let expected = PpcException::FloatingPoint {
-            pc: 0x1000,
+            instruction_pc: 0x1000,
             causes: (1 << 29) | (1 << 21), // VX | VXZDZ
         };
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.pending_exception(), Some(expected));
         assert_eq!(cpu.take_pending_exception(), Some(expected));
         assert_eq!(cpu.state.fpr[1], 123.0); // enabled invalid suppresses destination write
+    }
+
+    #[test]
+    fn msr_fe_bits_decode_all_four_powerpc_exception_modes() {
+        let mut cpu = PpcInterpreter::default();
+        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Disabled);
+
+        cpu.state.msr = PPC_MSR_FE1;
+        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::ImpreciseNonRecoverable);
+
+        cpu.state.msr = PPC_MSR_FE0;
+        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::ImpreciseRecoverable);
+
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Precise);
+    }
+
+    #[test]
+    fn imprecise_fp_exception_mode_does_not_block_following_instruction() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fdiv f1,f2,f3; addi r4,r4,1
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE1; // imprecise nonrecoverable
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                causes: (1 << 29) | (1 << 21),
+                mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
+            })
+        );
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[4], 1);
+        assert_eq!(cpu.state.pc, 0x1008);
     }
 
     #[test]
@@ -4780,6 +4866,7 @@ mod tests {
             Some(PpcException::FloatingPoint {
                 pc: 0x1000,
                 causes: 1 << 25, // XX
+                mode: PpcFpExceptionMode::Precise,
             })
         );
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
@@ -4809,6 +4896,7 @@ mod tests {
             Some(PpcException::FloatingPoint {
                 pc: 0x1000,
                 causes: (1 << 29) | (1 << 19), // VX | VXVC
+                mode: PpcFpExceptionMode::Precise,
             })
         );
         assert_ne!(cpu.state.fpscr & (1 << 19), 0); // VXVC
