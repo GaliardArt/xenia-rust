@@ -506,7 +506,7 @@ impl PpcInterpreter {
                         } else {
                             (right as u32) & 0x3F
                         };
-                        let value = match xo {
+                        let value = match extended_opcode {
                             24 => {
                                 if shift > 31 {
                                     0
