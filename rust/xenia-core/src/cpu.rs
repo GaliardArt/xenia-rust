@@ -110,6 +110,32 @@ impl PpcInterpreter {
                 self.state.gpr[rt_rs] = base.wrapping_add((immediate << 16) as u64);
                 self.state.pc = next_pc;
             }
+            // mulli RT,RA,SI — multiply by a sign-extended immediate.
+            7 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                self.state.gpr[rt_rs] = (base as i64).wrapping_mul(immediate) as u64;
+                self.state.pc = next_pc;
+            }
+            // subfic RT,RA,SI — subtract RA from the sign-extended immediate.
+            8 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                let minuend = immediate as u64;
+                let (value, borrow) = minuend.overflowing_sub(base);
+                self.state.gpr[rt_rs] = value;
+                self.state.xer = (self.state.xer & !(1 << 29)) | ((!borrow as u64) << 29);
+                self.state.pc = next_pc;
+            }
+            // addic/addic. RT,RA,SI — add immediate and set carry.
+            12 | 13 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] };
+                let (value, carry) = base.overflowing_add(immediate as u64);
+                self.state.gpr[rt_rs] = value;
+                self.state.xer = (self.state.xer & !(1 << 29)) | ((carry as u64) << 29);
+                if opcode == 13 {
+                    self.set_cr_field(0, (value as i64).cmp(&0));
+                }
+                self.state.pc = next_pc;
+            }
             // cmpwi BF,RA,SI — compare signed word or doubleword.
             11 => {
                 let field = ((instruction >> 23) & 0x7) as usize;
@@ -158,6 +184,23 @@ impl PpcInterpreter {
                 self.state.gpr[ra] = value as u64;
                 if instruction & 1 != 0 {
                     self.set_cr_field(0, (value as i32).cmp(&0));
+                }
+                self.state.pc = next_pc;
+            }
+            // xori/xoris, andi./andis. — immediate logical operations.
+            26..=29 => {
+                let source = self.state.gpr[rt_rs];
+                let immediate = (instruction & 0xFFFF) as u64;
+                let (value, record) = match opcode {
+                    26 => (source ^ immediate, false),
+                    27 => (source ^ (immediate << 16), false),
+                    28 => (source & immediate, true),
+                    29 => (source & (immediate << 16), true),
+                    _ => unreachable!(),
+                };
+                self.state.gpr[ra] = value;
+                if record {
+                    self.set_cr_field(0, (value as i64).cmp(&0));
                 }
                 self.state.pc = next_pc;
             }
