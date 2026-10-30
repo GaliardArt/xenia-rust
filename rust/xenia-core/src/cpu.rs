@@ -83,6 +83,25 @@ impl PpcInterpreter {
         self.state.cr[field] = result | summary_overflow;
     }
 
+    fn update_overflow(&mut self, overflow: bool) {
+        const SO: u64 = 1 << 31;
+        const OV: u64 = 1 << 30;
+        self.state.xer &= !OV;
+        if overflow { self.state.xer |= OV | SO; }
+    }
+
+    fn set_carry(&mut self, carry: bool) {
+        const CA: u64 = 1 << 29;
+        self.state.xer = (self.state.xer & !CA) | ((carry as u64) << 29);
+    }
+
+    fn set_cr_bit(&mut self, bit_index: usize, value: bool) {
+        let field = bit_index / 4;
+        let mask = 1 << (3 - (bit_index % 4));
+        if value { self.state.cr[field] |= mask; }
+        else { self.state.cr[field] &= !mask; }
+    }
+
     /// Fetches and executes one big-endian 32-bit instruction.
     pub fn step<M>(&mut self, memory: &mut M) -> Result<(), PpcError>
     where
@@ -122,7 +141,7 @@ impl PpcInterpreter {
                 let minuend = immediate as u64;
                 let (value, borrow) = minuend.overflowing_sub(base);
                 self.state.gpr[rt_rs] = value;
-                self.state.xer = (self.state.xer & !(1 << 29)) | ((!borrow as u64) << 29);
+                self.set_carry(!borrow);
                 self.state.pc = next_pc;
             }
             // addic/addic. RT,RA,SI — add immediate and set carry.
@@ -130,7 +149,7 @@ impl PpcInterpreter {
                 let base = self.state.gpr[ra];
                 let (value, carry) = base.overflowing_add(immediate as u64);
                 self.state.gpr[rt_rs] = value;
-                self.state.xer = (self.state.xer & !(1 << 29)) | ((carry as u64) << 29);
+                self.set_carry(carry);
                 if opcode == 13 {
                     self.set_cr_field(0, (value as i64).cmp(&0));
                 }
@@ -251,6 +270,7 @@ impl PpcInterpreter {
             31 => {
                 let rb = ((instruction >> 11) & 0x1F) as usize;
                 let extended_opcode = (instruction >> 1) & 0x3FF;
+                let xo = extended_opcode & 0x1FF;
                 let record = instruction & 1 != 0;
                 let oe = instruction & (1 << 10) != 0;
                 let left = self.state.gpr[ra];
@@ -272,19 +292,67 @@ impl PpcInterpreter {
                         };
                         self.set_cr_field(field, ordering);
                     }
-                    266 | 40 => {
-                        if oe {
-                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
-                        }
-                        let value = if extended_opcode == 266 {
-                            left.wrapping_add(right)
-                        } else {
-                            right.wrapping_sub(left)
+                    266 | 778 | 40 | 552 | 10 | 522 | 138 | 650 | 8 | 520 | 136 | 648 => {
+                        let (value, carry, overflow) = match xo {
+                            266 | 10 | 138 => {
+                                let carry_in = if xo == 138 && self.state.xer & (1 << 29) != 0 { 1_u64 } else { 0 };
+                                let (partial, c1) = left.overflowing_add(right);
+                                let (value, c2) = partial.overflowing_add(carry_in);
+                                let overflow = ((!(left ^ right) & (left ^ value)) >> 63) != 0;
+                                (value, c1 || c2, overflow)
+                            }
+                            40 | 8 | 136 => {
+                                let borrow_in = if xo == 136 && self.state.xer & (1 << 29) != 0 { 0_u64 } else { 1_u64 };
+                                let (partial, b1) = right.overflowing_sub(left);
+                                let (value, b2) = partial.overflowing_sub(borrow_in - 1);
+                                let overflow = (((right ^ left) & (right ^ value)) >> 63) != 0;
+                                (value, !(b1 || b2), overflow)
+                            }
+                            _ => unreachable!(),
                         };
                         self.state.gpr[rt_rs] = value;
-                        if record {
-                            self.set_cr_field(0, (value as i64).cmp(&0));
-                        }
+                        if oe { self.update_overflow(overflow); }
+                        else if xo == 10 || xo == 8 || xo == 138 || xo == 136 { self.set_carry(carry); }
+                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                    }
+                    104 | 616 => {
+                        let value = self.state.gpr[ra].wrapping_neg();
+                        let overflow = self.state.gpr[ra] == (1_u64 << 63);
+                        self.state.gpr[rt_rs] = value;
+                        if oe { self.update_overflow(overflow); }
+                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                    }
+                    235 | 747 => {
+                        let a = self.state.gpr[ra] as u32 as i32 as i64;
+                        let b = self.state.gpr[rb] as u32 as i32 as i64;
+                        let product = a.wrapping_mul(b);
+                        let value = product as u32 as i32 as i64 as u64;
+                        let overflow = product != (product as i32 as i64);
+                        self.state.gpr[rt_rs] = value;
+                        if oe { self.update_overflow(overflow); }
+                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                    }
+                    11 | 75 => {
+                        let a = if xo == 75 { self.state.gpr[ra] as u32 as i32 as i64 } else { self.state.gpr[ra] as u32 as u64 as i64 };
+                        let b = if xo == 75 { self.state.gpr[rb] as u32 as i32 as i64 } else { self.state.gpr[rb] as u32 as u64 as i64 };
+                        let value = ((a * b) >> 32) as u64;
+                        self.state.gpr[rt_rs] = value;
+                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                    }
+                    459 | 491 => {
+                        let dividend = self.state.gpr[ra] as u32;
+                        let divisor = self.state.gpr[rb] as u32;
+                        let signed = xo == 491;
+                        let (value, overflow) = if divisor == 0 { (0, true) }
+                        else if signed {
+                            let a = dividend as i32;
+                            let b = divisor as i32;
+                            if a == i32::MIN && b == -1 { (0, true) }
+                            else { ((a / b) as u32 as u64, false) }
+                        } else { ((dividend / divisor) as u64, false) };
+                        self.state.gpr[rt_rs] = value;
+                        if oe { self.update_overflow(overflow); }
+                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
                     }
                     28 | 316 | 444 => {
                         let value = match extended_opcode {
@@ -298,6 +366,27 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
+                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                }
+                self.state.pc = next_pc;
+            }
+            // Condition-register logical operations.
+            19 => {
+                let bt = ((instruction >> 21) & 0x1F) as usize;
+                let ba = ((instruction >> 16) & 0x1F) as usize;
+                let bb = ((instruction >> 11) & 0x1F) as usize;
+                let xo = (instruction >> 1) & 0x3FF;
+                let a = self.state.cr[ba / 4] & (1 << (3 - (ba % 4))) != 0;
+                let b = self.state.cr[bb / 4] & (1 << (3 - (bb % 4))) != 0;
+                match xo {
+                    257 => self.set_cr_bit(bt, a & b),
+                    129 => self.set_cr_bit(bt, a & !b),
+                    289 => self.set_cr_bit(bt, a == b),
+                    225 => self.set_cr_bit(bt, !(a & b)),
+                    33 => self.set_cr_bit(bt, !(a | b)),
+                    449 => self.set_cr_bit(bt, a | b),
+                    417 => self.set_cr_bit(bt, a | !b),
+                    193 => self.set_cr_bit(bt, a ^ b),
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.pc = next_pc;
