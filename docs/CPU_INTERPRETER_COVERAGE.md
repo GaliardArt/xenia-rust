@@ -27,7 +27,7 @@ architectural conformance.
 | Integer immediate | addi, addis, mulli, subfic, addic/addic., cmpwi, cmplwi; ori/oris, xori/xoris, andi./andis. | addic carry edge semantics need vectors; other immediate arithmetic/logical forms and traps are absent. |
 | Rotate/mask | rlwimi, rlwinm, rlwnm | 64-bit rotate/mask forms (rld*) and exhaustive mask/record tests absent. |
 | Integer compare | cmpw/cmplw and immediate forms | cmpd/cmpld field/L-bit handling and complete CR semantics need validation. |
-| Integer arithmetic | add, addc, adde, subf, subfc, subfe, neg, mullw, mulhw/mulhwu, divw/divwu subsets | 64-bit arithmetic/divide, addme/addze/subfme/subfze, mullwo variants, exact OE/Rc behavior and divide corner cases are incomplete. |
+| Integer arithmetic | add, addc, adde, addme, addze, subf, subfc, subfe, subfme, subfze, neg, mullw, mulhw/mulhwu, divw/divwu/divd/divdu | remaining 64-bit arithmetic families, mullwo variants, exhaustive OE/Rc behavior, and other divide edge cases are incomplete. |
 | Integer logical | and/andc/nor/eqv/xor/or/orc/nand; immediate forms | exhaustive operand-field, Rc and 64-bit semantics tests absent. |
 | Shift/count/sign extension | slw, srw, sraw, srawi, cntlzw/cntlzd, extsb/extsh/extsw | 64-bit shifts and complete CA edge cases require validation; current shift code needs review against ISA vectors. |
 | Branch/control | b, bc, bclr, bcctr; CR bit logical subset | traps, syscall/system instructions, SPR/TBR/MSR, synchronization, complete BO/BI combinations and exception semantics absent. |
