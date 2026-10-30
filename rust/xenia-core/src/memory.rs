@@ -113,6 +113,23 @@ impl GuestMemory {
         Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    /// Reads a 64-bit value in the Xbox 360's big-endian byte order.
+    pub fn read_u64_be(&self, address: GuestAddress) -> Result<u64, MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(8).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self.bytes.get(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        Ok(u64::from_be_bytes(bytes.try_into().expect("slice length is checked")))
+    }
+
+    /// Writes a 64-bit value in the Xbox 360's big-endian byte order.
+    pub fn write_u64_be(&mut self, address: GuestAddress, value: u64) -> Result<(), MemoryError> {
+        let offset = self.offset_of(address)?;
+        let end = offset.checked_add(8).ok_or(MemoryError::OutOfBounds)?;
+        let bytes = self.bytes.get_mut(offset..end).ok_or(MemoryError::OutOfBounds)?;
+        bytes.copy_from_slice(&value.to_be_bytes());
+        Ok(())
+    }
+
     /// Writes a 32-bit value in the Xbox 360's big-endian byte order.
     pub fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), MemoryError> {
         let offset = self.offset_of(address)?;
@@ -160,6 +177,10 @@ pub trait GuestMemoryAccess {
 
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error>;
 
+    fn read_u64_be(&self, address: GuestAddress) -> Result<u64, Self::Error>;
+
+    fn write_u64_be(&mut self, address: GuestAddress, value: u64) -> Result<(), Self::Error>;
+
     fn fetch_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
         self.read_u32_be(address)
     }
@@ -188,6 +209,14 @@ impl GuestMemoryAccess for GuestMemory {
 
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
         GuestMemory::read_u32_be(self, address)
+    }
+
+    fn read_u64_be(&self, address: GuestAddress) -> Result<u64, Self::Error> {
+        GuestMemory::read_u64_be(self, address)
+    }
+
+    fn write_u64_be(&mut self, address: GuestAddress, value: u64) -> Result<(), Self::Error> {
+        GuestMemory::write_u64_be(self, address, value)
     }
 
     fn write_u32_be(&mut self, address: GuestAddress, value: u32) -> Result<(), Self::Error> {
