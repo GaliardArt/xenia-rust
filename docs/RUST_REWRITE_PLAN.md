@@ -51,7 +51,7 @@ and the full repository delta remains open.
 ### M0 — Baseline and workspace
 - [x] Preserve the C++ baseline and create a separate Rust branch.
 - [x] Add Cargo workspace, core/CLI crates, and checked memory primitive.
-- [ ] Run formatting, tests, and Clippy in a real Rust toolchain environment.
+- [x] Run formatting, tests, and Clippy in a real Rust toolchain environment.
 - [ ] Record exact parent/base commit and inventory all fork-specific changes.
 
 Acceptance: Rust builds independently, tests pass, and the C++ tree remains untouched.
@@ -65,13 +65,14 @@ Acceptance: Rust builds independently, tests pass, and the C++ tree remains unto
 Progress: the complete recursive tracked tree matches upstream at baseline commit
 48b318a2ad7c36f8f3901a94e290ba70ae0ffec5: 2,097 tree entries, zero path/SHA/mode
 differences, and 33 identical submodule gitlinks. See TECHNICAL_AUDIT_PHASE_1.md
-and SUBSYSTEM_INVENTORY.md. GitHub Actions successfully passed format, tests and
-Clippy for the initial PPC/memory implementation; each subsequent code change is
-being checked again.
+and SUBSYSTEM_INVENTORY.md. GitHub Actions passed format, workspace tests, Clippy with warnings denied,
+and the CLI help smoke test on commit `d99be0c7509808ef818981e264538a72fa8a2e46`.
+The current loader extension is being revalidated after its final allocation guard.
 
 ### M2 — Memory and executable foundations
 - [x] Add mapped address-space abstraction, endianness-safe access, and region permissions; MMIO remains open.
 - [x] Parse XEX2 fixed/security metadata and Xbox PE32 headers with malformed-input tests.
+- [x] Extract unencrypted XEX2 images (none/basic compression) and map page-descriptor ranges transactionally with code/data/read-only permissions.
 - [ ] Establish logging, errors, and diagnostics conventions.
 
 ### M3 — CPU interpreter
@@ -105,9 +106,11 @@ deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
 beq/bne forms, lwz and stw); and defensive XEX2 fixed-header/optional-header and Xbox PE32 header/section
 parsers. Both parsers have malformed-input tests; the CLI can inspect XEX2 and
 PE metadata. Unsupported CPU opcodes fail explicitly.
-This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases, page-level permissions, encrypted/compressed XEX decoding,
-actual PE section mapping, import resolution, kernel services, concurrency,
-most PPC instructions and exception semantics remain future work. The CLI cannot run Xbox 360 games. Current CI runs `cargo fmt`, workspace tests,
+This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
+page-granular MMU semantics, AES decryption, normal/LZX compression, XEX patching,
+import resolution, kernel services, concurrency, most PPC instructions and
+exception semantics remain future work. The current page-descriptor mapper is a
+first safe loading stage, not title boot support. The CLI cannot run Xbox 360 games. Current CI runs `cargo fmt`, workspace tests,
 Clippy with warnings denied, and a CLI help smoke test.
 
 ## Local validation commands
