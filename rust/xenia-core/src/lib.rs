@@ -4,6 +4,7 @@
 pub mod address_space;
 pub mod cpu;
 pub mod layout;
+pub mod loader;
 pub mod memory;
 pub mod pe;
 pub mod security;
@@ -12,6 +13,7 @@ pub mod xex;
 pub use address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
 pub use cpu::{PpcError, PpcInterpreter, PpcState};
 pub use layout::{ImageLayout, LayoutError, LoadedSection, plan_image_layout};
+pub use loader::{XEX_HEADER_FILE_FORMAT_INFO, XEX_HEADER_IMAGE_BASE_ADDRESS, XexLoadError, XexLoadedImage, load_xex2_uncompressed};
 pub use memory::{GuestAddress, GuestMemory, GuestMemoryAccess, MemoryError};
 pub use pe::{PeError, PeSection, XboxPeImage, parse_xbox_pe32};
 pub use security::{
