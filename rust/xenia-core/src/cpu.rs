@@ -1359,8 +1359,14 @@ impl PpcInterpreter {
                         let spr =
                             (((instruction >> 11) & 0x1F) << 5) | ((instruction >> 16) & 0x1F);
                         match (extended_opcode, spr) {
+                            (339, 1) => self.state.gpr[rt_rs] = self.state.xer,
+                            (339, 8) => self.state.gpr[rt_rs] = self.state.lr,
+                            (339, 9) => self.state.gpr[rt_rs] = self.state.ctr,
                             (339, 26) => self.state.gpr[rt_rs] = self.state.srr0,
                             (339, 27) => self.state.gpr[rt_rs] = self.state.srr1,
+                            (467, 1) => self.state.xer = self.state.gpr[rt_rs],
+                            (467, 8) => self.state.lr = self.state.gpr[rt_rs],
+                            (467, 9) => self.state.ctr = self.state.gpr[rt_rs],
                             (467, 26) => self.state.srr0 = self.state.gpr[rt_rs],
                             (467, 27) => self.state.srr1 = self.state.gpr[rt_rs],
                             _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
@@ -2306,7 +2312,11 @@ impl PpcInterpreter {
                         };
                         let adjusted = overflow_enabled || underflow_enabled;
                         let mut rounded = if adjusted {
-                            self.round_to_single_significand(adjusted_value)
+                            let scaled = self.round_to_single_significand(adjusted_value);
+                            Self::scale_by_power_of_two(
+                                scaled,
+                                if overflow_enabled { 192 } else { -192 },
+                            )
                         } else {
                             self.round_to_single(b)
                         };
@@ -2323,7 +2333,7 @@ impl PpcInterpreter {
                         }
                         frsp_inexact = ni_flush
                             || if adjusted {
-                                rounded != adjusted_value
+                                rounded != b
                             } else {
                                 (b.is_finite() && rounded.is_finite() && rounded != b)
                                     || (frsp_overflow && !overflow_enabled)
@@ -2331,7 +2341,7 @@ impl PpcInterpreter {
                         frsp_underflow = tiny && (underflow_enabled || frsp_inexact);
                         frsp_fraction_rounded = !frsp_overflow
                             && if adjusted {
-                                rounded.abs() > adjusted_value.abs()
+                                rounded.abs() > b.abs()
                             } else {
                                 frsp_inexact && b.is_finite() && rounded.abs() > b.abs()
                             };
@@ -2507,7 +2517,11 @@ impl PpcInterpreter {
                     };
                     let adjusted_exponent = overflow_enabled || underflow_enabled;
                     let mut rounded = if adjusted_exponent {
-                        self.round_to_single_significand(adjusted_value)
+                        let scaled = self.round_to_single_significand(adjusted_value);
+                        Self::scale_by_power_of_two(
+                            scaled,
+                            if overflow_enabled { 192 } else { -192 },
+                        )
                     } else {
                         self.round_to_single(value)
                     };
@@ -2527,7 +2541,7 @@ impl PpcInterpreter {
                     if update_status {
                         let inexact = ni_flush
                             || if adjusted_exponent {
-                                rounded != adjusted_value
+                                rounded != value
                             } else {
                                 (value.is_finite() && rounded.is_finite() && rounded != value)
                                     || (overflow && !overflow_enabled)
@@ -2535,7 +2549,7 @@ impl PpcInterpreter {
                         let fraction_rounded = if overflow {
                             false
                         } else if adjusted_exponent {
-                            rounded.abs() > adjusted_value.abs()
+                            rounded.abs() > value.abs()
                         } else {
                             (value.is_finite() && rounded.abs() > value.abs())
                                 || (value.is_infinite()
@@ -4380,6 +4394,10 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
         assert_eq!(cpu.state.fpscr & (1 << 19), 0); // VXVC suppressed for enabled SNaN
+        assert!(matches!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint { .. })
+        ));
 
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0; // VE disabled
@@ -5558,7 +5576,7 @@ mod tests {
             cpu.pending_exception = Some(pending);
 
             let original_fpscr = cpu.state.fpscr;
-            let original_fpr = cpu.state.fpr;
+            let original_fpr_bits = cpu.state.fpr.map(|value| value.to_bits());
             let original_cr = cpu.state.cr;
 
             assert_eq!(
@@ -5567,7 +5585,7 @@ mod tests {
             );
             assert_eq!(cpu.state.pc, 0x1000);
             assert_eq!(cpu.state.fpscr, original_fpscr);
-            assert_eq!(cpu.state.fpr, original_fpr);
+            assert_eq!(cpu.state.fpr.map(|value| value.to_bits()), original_fpr_bits);
             assert_eq!(cpu.state.cr, original_cr);
             assert_eq!(cpu.pending_exception(), Some(pending));
         }
