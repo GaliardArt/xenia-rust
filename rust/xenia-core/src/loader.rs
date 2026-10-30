@@ -5,7 +5,9 @@
 
 use core::fmt;
 
+use crate::address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
 use crate::layout::{ImageLayout, LayoutError, plan_image_layout};
+use crate::memory::GuestAddress;
 use crate::pe::{PeError, XboxPeImage, parse_xbox_pe32};
 use crate::security::{SecurityInfoError, XexSecurityInfo, parse_xex2_security_info};
 use crate::xex::{XexError, XexHeader, parse_xex2_header};
@@ -35,6 +37,9 @@ pub enum XexLoadError {
     SecurityInfo(SecurityInfoError),
     Pe(PeError),
     Layout(LayoutError),
+    AddressSpace(AddressSpaceError),
+    SectionDataOutOfBounds,
+    MappedImageTooLarge,
     MissingFileFormatHeader,
     FileFormatHeaderOutOfBounds,
     InvalidFileFormatHeaderSize,
@@ -54,6 +59,9 @@ impl fmt::Display for XexLoadError {
             Self::SecurityInfo(error) => write!(f, "XEX security info: {error}"),
             Self::Pe(error) => write!(f, "embedded PE image: {error}"),
             Self::Layout(error) => write!(f, "PE image layout: {error}"),
+            Self::AddressSpace(error) => write!(f, "guest memory mapping: {error}"),
+            Self::SectionDataOutOfBounds => f.write_str("PE section data exceeds image bounds"),
+            Self::MappedImageTooLarge => f.write_str("mapped PE image exceeds the safety limit"),
             Self::MissingFileFormatHeader => {
                 f.write_str("XEX file-format optional header is missing")
             }
@@ -102,9 +110,67 @@ impl From<PeError> for XexLoadError {
     }
 }
 
+impl From<AddressSpaceError> for XexLoadError {
+    fn from(value: AddressSpaceError) -> Self {
+        Self::AddressSpace(value)
+    }
+}
+
 impl From<LayoutError> for XexLoadError {
     fn from(value: LayoutError) -> Self {
         Self::Layout(value)
+    }
+}
+
+impl XexLoadedImage {
+    /// Maps all PE sections transactionally. Existing address-space contents are
+    /// preserved if any section is malformed or overlaps an existing mapping.
+    pub fn map_into(
+        &self,
+        address_space: &mut GuestAddressSpace,
+    ) -> Result<(), XexLoadError> {
+        if self.layout.sections.len() != self.pe.sections.len() {
+            return Err(XexLoadError::SectionDataOutOfBounds);
+        }
+        let total_size = self.layout.sections.iter().try_fold(0_usize, |total, section| {
+            total
+                .checked_add(section.size as usize)
+                .ok_or(XexLoadError::MappedImageTooLarge)
+        })?;
+        if total_size > MAX_IMAGE_SIZE {
+            return Err(XexLoadError::MappedImageTooLarge);
+        }
+
+        let mut staged = address_space.clone();
+        for (layout_section, pe_section) in
+            self.layout.sections.iter().zip(&self.pe.sections)
+        {
+            if layout_section.size == 0 {
+                continue;
+            }
+            let raw_size = pe_section.raw_size as usize;
+            let raw_end = (pe_section.raw_pointer as usize)
+                .checked_add(raw_size)
+                .ok_or(XexLoadError::SectionDataOutOfBounds)?;
+            let raw_data = self
+                .image
+                .get(pe_section.raw_pointer as usize..raw_end)
+                .ok_or(XexLoadError::SectionDataOutOfBounds)?;
+            let permissions = MemoryPermissions {
+                read: layout_section.readable,
+                write: layout_section.writable,
+                execute: layout_section.executable,
+            };
+            staged.map_initialized(
+                GuestAddress(layout_section.address),
+                layout_section.size as usize,
+                permissions,
+                raw_data,
+            )?;
+        }
+
+        *address_space = staged;
+        Ok(())
     }
 }
 
@@ -299,6 +365,8 @@ mod tests {
         let optional = file_header + 20;
         let section = optional + 224;
         let mut bytes = vec![0; section + 40];
+        bytes.resize(0x300, 0);
+        bytes[0x200..0x300].fill(0xA5);
         bytes[0..2].copy_from_slice(b"MZ");
         put_u32_le(&mut bytes, 0x3C, nt as u32);
         bytes[nt..nt + 4].copy_from_slice(b"PE\0\0");
