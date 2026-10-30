@@ -108,11 +108,11 @@ impl From<LayoutError> for XexLoadError {
     }
 }
 
-/// Loads an XEX2 with no encryption and no compression into an owned image plan.
+/// Loads an XEX2 with no encryption and either no compression or basic compression.
 ///
 /// Encrypted, compressed, patched, and non-XEX2 formats are rejected explicitly.
 /// The returned image is not mapped into guest memory.
-pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadError> {
+pub fn load_xex2_image(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadError> {
     let header = parse_xex2_header(bytes)?;
     let security = parse_xex2_security_info(bytes, &header)?;
 
@@ -275,7 +275,7 @@ fn read_u32_be(bytes: &[u8], offset: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{XEX_HEADER_FILE_FORMAT_INFO, XexLoadError, load_xex2_uncompressed};
+    use super::{XEX_HEADER_FILE_FORMAT_INFO, XexLoadError, load_xex2_image};
 
     fn put_u16_le(bytes: &mut [u8], offset: usize, value: u16) {
         bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn loads_unencrypted_uncompressed_xex2_and_plans_image() {
-        let loaded = load_xex2_uncompressed(&valid_xex()).unwrap();
+        let loaded = load_xex2_image(&valid_xex()).unwrap();
         assert_eq!(loaded.security.load_address, 0x8200_0000);
         assert_eq!(loaded.image, valid_pe());
         assert_eq!(loaded.layout.entry_point, 0x8200_1000);
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn loads_unencrypted_basic_compressed_xex2() {
-        let loaded = load_xex2_uncompressed(&basic_fixture()).unwrap();
+        let loaded = load_xex2_image(&basic_fixture()).unwrap();
         assert_eq!(loaded.image.len(), 0x1000);
         assert_eq!(&loaded.image[..2], b"MZ");
         assert!(
@@ -415,14 +415,14 @@ mod tests {
         let format_offset = 0x40 + 0x184;
         put_u16_be(&mut encrypted, format_offset + 4, 1);
         assert_eq!(
-            load_xex2_uncompressed(&encrypted),
+            load_xex2_image(&encrypted),
             Err(XexLoadError::UnsupportedEncryption(1))
         );
 
         let mut compressed = valid_xex();
         put_u16_be(&mut compressed, format_offset + 6, 2);
         assert_eq!(
-            load_xex2_uncompressed(&compressed),
+            load_xex2_image(&compressed),
             Err(XexLoadError::UnsupportedCompression(2))
         );
     }
