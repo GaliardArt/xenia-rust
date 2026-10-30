@@ -4208,6 +4208,40 @@ mod tests {
     }
 
     #[test]
+    fn floating_point_64_bit_integer_conversions_round_and_truncate() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fctid f1,f2; fctidz f3,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (814 << 1),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            (63 << 26) | (3 << 21) | (2 << 11) | (815 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
+        cpu.state.fpr[2] = 42.75;
+        cpu.state.fpr[3] = f64::from_bits(0x8765_4321_ABCD_EF01);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[1].to_bits(), 43_i64 as u64);
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR
+
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.fpr[3].to_bits(), 42_i64 as u64);
+        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // FI
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // truncation is not away from zero
+    }
+
+    #[test]
     fn integer_conversion_overflow_saturates_by_sign() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // fctiw f1,f2; fctiw f3,f4; fctid f5,f6; fctid f7,f8
