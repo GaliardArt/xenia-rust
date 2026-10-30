@@ -511,11 +511,7 @@ mod tests {
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (12 << 26) | (4 << 21) | (3 << 16) | 1,
-        );
+        put_instruction(&mut memory, 0x1000, (12 << 26) | (4 << 21) | (3 << 16) | 1);
         // andi. r5,r4,0xFFFF
         put_instruction(
             &mut memory,
@@ -539,11 +535,7 @@ mod tests {
     fn mulli_reads_gpr_zero_as_a_register() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mulli r4,r0,2
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (7 << 26) | (4 << 21) | (2 << 0),
-        );
+        put_instruction(&mut memory, 0x1000, (7 << 26) | (4 << 21) | (2 << 0));
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[0] = 3;
