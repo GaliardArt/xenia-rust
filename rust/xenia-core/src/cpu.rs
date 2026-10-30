@@ -926,6 +926,27 @@ mod tests {
     }
 
     #[test]
+    fn displacement_update_load_and_store_write_back_effective_address() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 64);
+        // lwzu r5,4(r3); stwu r6,8(r3)
+        put_instruction(&mut memory, 0x1000, (33 << 26) | (5 << 21) | (3 << 16) | 4);
+        put_instruction(&mut memory, 0x1004, (37 << 26) | (6 << 21) | (3 << 16) | 8);
+        memory.write_u32_be(GuestAddress(0x1014), 0x1234_5678).unwrap();
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1010;
+        cpu.state.gpr[6] = 0xCAFE_BABE;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[5], 0x1234_5678);
+        assert_eq!(cpu.state.gpr[3], 0x1014);
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(memory.read_u32_be(GuestAddress(0x101C)), Ok(0xCAFE_BABE));
+        assert_eq!(cpu.state.gpr[3], 0x101C);
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
