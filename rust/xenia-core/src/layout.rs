@@ -1,7 +1,7 @@
 //! Pure planning of PE section mappings before guest memory is mutated.
 
-use core::fmt;
 use crate::pe::XboxPeImage;
+use core::fmt;
 
 const EXECUTE: u32 = 0x2000_0000;
 const READ: u32 = 0x4000_0000;
@@ -44,7 +44,9 @@ impl fmt::Display for LayoutError {
         match self {
             Self::AddressOverflow => f.write_str("image section exceeds guest address space"),
             Self::OverlappingSections => f.write_str("image sections overlap"),
-            Self::EntryPointNotExecutable => f.write_str("entry point is not in executable section"),
+            Self::EntryPointNotExecutable => {
+                f.write_str("entry point is not in executable section")
+            }
         }
     }
 }
@@ -102,7 +104,12 @@ pub fn plan_image_layout(image: &XboxPeImage, load_base: u32) -> Result<ImageLay
         return Err(LayoutError::EntryPointNotExecutable);
     }
 
-    Ok(ImageLayout { load_base, entry_point, image_end_exclusive, sections })
+    Ok(ImageLayout {
+        load_base,
+        entry_point,
+        image_end_exclusive,
+        sections,
+    })
 }
 
 
