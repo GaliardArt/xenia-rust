@@ -819,7 +819,7 @@ impl PpcInterpreter {
                         memory
                             .read_u64_be(GuestAddress(address))
                             .map_err(Into::into)?,
-                    )
+                    ),
                     _ => unreachable!(),
                 };
                 self.state.fpr[rt_rs] = value;
