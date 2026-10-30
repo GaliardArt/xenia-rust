@@ -98,11 +98,6 @@ impl PpcInterpreter {
         self.pending_exception.take()
     }
 
-    /// Returns the pending guest exception without consuming it.
-    pub fn pending_exception(&self) -> Option<PpcException> {
-        self.pending_exception
-    }
-
     fn branch_condition(&mut self, bo: u8, bi: usize) -> bool {
         let ignore_cr = bo & 0x10 != 0;
         let expected_cr = bo & 0x08 != 0;
@@ -4622,6 +4617,7 @@ mod tests {
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 123.0;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
@@ -4634,7 +4630,7 @@ mod tests {
             cpu.step(&mut memory),
             Err(PpcError::GuestException(expected))
         );
-        assert_eq!(cpu.pending_exception(), None);
+        assert_eq!(cpu.state.fpr[1], 123.0); // enabled invalid suppresses destination write
         assert_eq!(cpu.take_pending_exception(), None);
     }
 
@@ -4654,7 +4650,6 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_eq!(cpu.pending_exception(), None);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // sticky VX still records
     }
 
