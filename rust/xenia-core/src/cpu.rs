@@ -8,7 +8,7 @@ use core::cmp::Ordering;
 use crate::address_space::AddressSpaceError;
 use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
-/// PowerPC MSR floating-point exception mode bits (32-bit Xenon view).
+/// PowerPC MSR floating-point exception mode bits in Xenon's 64-bit MSR.
 pub const PPC_MSR_FE0: u64 = 1 << 11;
 pub const PPC_MSR_FE1: u64 = 1 << 8;
 /// Effective address of the Xenon Program Exception vector.
@@ -184,13 +184,14 @@ impl PpcInterpreter {
         };
 
         self.state.srr0 = saved_pc;
+        let exception_status = if subsequent_instruction {
+            PPC_SRR1_IMPRECISE
+        } else {
+            0
+        };
         self.state.srr1 = (self.state.msr & SRR1_MSR_MASK)
             | PPC_SRR1_FP_ENABLED_EXCEPTION
-            | if subsequent_instruction {
-                PPC_SRR1_IMPRECISE
-            } else {
-                0
-            };
+            | exception_status;
         self.state.msr =
             (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
         self.state.pc = PPC_PROGRAM_EXCEPTION_VECTOR;
@@ -1244,6 +1245,33 @@ impl PpcInterpreter {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
                 let bi = ((instruction >> 16) & 0x1F) as usize;
                 let extended_opcode = (instruction >> 1) & 0x3FF;
+                if extended_opcode == 18 {
+                    // rfid restores the architecturally defined MSR fields
+                    // from SRR1. Exception syndrome bits 43:47 are not MSR
+                    // state and must not leak back into the running context.
+                    const RESTORE_MASK: u64 = 0xEFFF_FFFF_87C0_6FCF;
+                    const HYPERVISOR_RESTORE_MASK: u64 = (1 << 60) | (1 << 12);
+                    let saved = self.state.srr1;
+                    let mut restored = saved & RESTORE_MASK;
+                    if self.state.msr & (1 << 60) != 0 {
+                        restored |= saved & HYPERVISOR_RESTORE_MASK;
+                    }
+                    if saved & ((1 << 63) | (1 << 62)) != 0 {
+                        restored |= 1 << 63; // MSR[0] <- SRR1[0] | SRR1[1].
+                    }
+                    if saved & ((1 << 15) | (1 << 14)) != 0 {
+                        restored |= 1 << 15; // MSR[48] <- SRR1[48] | SRR1[49].
+                    }
+                    if saved & ((1 << 5) | (1 << 14)) != 0 {
+                        restored |= 1 << 5; // MSR[58] <- SRR1[58] | SRR1[49].
+                    }
+                    if saved & ((1 << 4) | (1 << 14)) != 0 {
+                        restored |= 1 << 4; // MSR[59] <- SRR1[59] | SRR1[49].
+                    }
+                    self.state.msr = restored;
+                    self.state.pc = (self.state.srr0 as u32) & !3;
+                    return Ok(());
+                }
                 if extended_opcode == 150 {
                     // isync is context-synchronizing. All prior guest
                     // instructions have completed before an imprecise FP
@@ -5579,6 +5607,35 @@ mod tests {
         assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
         assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, PPC_SRR1_IMPRECISE);
         assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+    }
+
+
+    #[test]
+    fn rfid_restores_fp_exception_context_without_replaying_srr1_syndrome_bits() {
+        let mut memory = GuestMemory::new(GuestAddress(0x700), 4);
+        // rfid (opcode 19, XO 18).
+        put_instruction(&mut memory, 0x700, (19 << 26) | (18 << 1));
+        let mut cpu = PpcInterpreter::default();
+        let original_msr = 0x0000_1234_0000_0030 | PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = original_msr;
+        cpu.state.pc = 0x1234;
+        cpu.pending_exception = Some(PpcException::FloatingPoint {
+            instruction_pc: 0x1234,
+            causes: 1 << 29,
+            mode: PpcFpExceptionMode::Precise,
+        });
+
+        cpu.enter_pending_exception().unwrap();
+        assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+        assert_ne!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, 0);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.pc, 0x1234);
+        assert_eq!(cpu.state.msr & (PPC_MSR_FE0 | PPC_MSR_FE1), PPC_MSR_FE0 | PPC_MSR_FE1);
+        assert_eq!(cpu.state.msr & 0x30, 0x30); // IR/DR restored from SRR1.
+        assert_eq!(cpu.state.msr & (1 << 20), 0); // SRR1 bit 43 is exception syndrome.
+        assert_eq!(cpu.state.msr & (1 << 16), 0); // SRR1 bit 47 is not MSR[ILE].
     }
 
 
