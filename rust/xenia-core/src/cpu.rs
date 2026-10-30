@@ -356,7 +356,7 @@ impl PpcInterpreter {
                     && operands[0] != 0.0
                     && operands[0].is_finite()
             }
-            24 | 26 => operands.first().is_some_and(|operand| *operand == 0.0),
+            24 | 26 => operands.last().is_some_and(|operand| *operand == 0.0),
             _ => false,
         };
         let overflow = !div_zero
@@ -3156,7 +3156,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0;
-        cpu.state.fpscr = 0xB000_0000;
+        cpu.state.fpscr = 0xB000_0000 | (1 << 9); // VXSQRT keeps the VX summary set
 
         cpu.step(&mut memory).unwrap();
 
@@ -3852,7 +3852,7 @@ mod tests {
         cpu.state.fpscr = 0b11; // toward -infinity
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], f64::NEG_INFINITY);
-        assert_ne!(cpu.state.fpscr & (1 << 18), 0);
+        assert_eq!(cpu.state.fpscr & (1 << 18), 0); // FR undefined on disabled overflow; modeled as zero
     }
 
     #[test]
