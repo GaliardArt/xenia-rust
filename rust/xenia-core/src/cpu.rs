@@ -47,7 +47,6 @@ pub enum PpcError {
     AddressSpace(AddressSpaceError),
     UnsupportedInstruction { pc: u32, opcode: u32 },
     UnsupportedBranchOption { pc: u32, bo: u8 },
-    GuestException(PpcException),
 }
 
 impl From<MemoryError> for PpcError {
@@ -94,8 +93,14 @@ pub struct PpcInterpreter {
 
 impl PpcInterpreter {
     /// Removes the pending guest exception so the outer CPU can dispatch it.
-    fn take_pending_exception(&mut self) -> Option<PpcException> {
+    pub fn take_pending_exception(&mut self) -> Option<PpcException> {
         self.pending_exception.take()
+    }
+
+    /// Inspects the guest exception produced by the most recent instruction.
+    /// The CPU loop should consume it after each successful step.
+    pub fn pending_exception(&self) -> Option<PpcException> {
+        self.pending_exception
     }
 
     fn branch_condition(&mut self, bo: u8, bi: usize) -> bool {
@@ -1880,9 +1885,6 @@ impl PpcInterpreter {
                         false,
                     );
                     self.state.pc = next_pc;
-                    if let Some(exception) = self.take_pending_exception() {
-                        return Err(PpcError::GuestException(exception));
-                    }
                     return Ok(());
                 }
 
@@ -2257,9 +2259,6 @@ impl PpcInterpreter {
                     }
                 }
                 self.state.pc = next_pc;
-                if let Some(exception) = self.take_pending_exception() {
-                    return Err(PpcError::GuestException(exception));
-                }
             }
             // lbz RT,D(RA) — load a zero-extended byte.
             34 => {
@@ -4626,10 +4625,9 @@ mod tests {
             pc: 0x1000,
             causes: (1 << 29) | (1 << 21), // VX | VXZDZ
         };
-        assert_eq!(
-            cpu.step(&mut memory),
-            Err(PpcError::GuestException(expected))
-        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.pending_exception(), Some(expected));
+        assert_eq!(cpu.take_pending_exception(), Some(expected));
         assert_eq!(cpu.state.fpr[1], 123.0); // enabled invalid suppresses destination write
     }
 
