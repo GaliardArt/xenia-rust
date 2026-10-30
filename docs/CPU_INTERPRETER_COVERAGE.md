@@ -39,9 +39,9 @@ architectural conformance.
 
 ## Correctness risks found during inspection
 
-These are audit findings to resolve before treating the corresponding family as complete:
+These are audit findings to resolve before treating the corresponding family as complete. Resolved findings are retained here as regression history:
 
-1. **64-bit divide decode/semantics:** X-form XO 971/1003 are accepted in the same arm as 32-bit divide, but the implementation truncates both operands to 32 bits. These must be split into the correct 32-bit and 64-bit operations and tested for zero, signed overflow, and high-bit operands.
+1. **64-bit divide decode/semantics — corrected:** the initial implementation confused OE-enabled XO encodings with separate operations and truncated 64-bit operands. The Rust decoder now distinguishes `divdu` (XO 457), `divwu` (459), `divd` (489), and `divw` (491), including their OE-enabled encodings. Regression tests cover high-bit operands, word truncation, divide-by-zero, and signed minimum divided by -1. CI passed on commit `5daf1e6b2346252193a7738d89041ebd88477408`.
 2. **Floating-point is approximate:** FPR values are represented as host `f64`; current conversions and arithmetic do not implement full FPSCR, rounding modes, exception flags, NaN behavior, or Xenon-specific details. Do not use this subset as evidence of game compatibility.
 3. **64-bit FP memory operations are composed from two 32-bit accesses:** this can partially mutate/read state if the second access faults. Add a checked atomic guest-memory 64-bit operation before claiming these forms correct.
 4. **VMX register model is incomplete:** the state allocates 128 vector slots, but the current primary-opcode-4 decoder uses ordinary 5-bit register fields and a small set of standard VMX XO values. This does not implement the Xenon VMX128 instruction encoding space.
