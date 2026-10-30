@@ -148,9 +148,7 @@ pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadErr
     if encryption_type != XEX_ENCRYPTION_NONE {
         return Err(XexLoadError::UnsupportedEncryption(encryption_type));
     }
-    if compression_type != XEX_COMPRESSION_NONE
-        && compression_type != XEX_COMPRESSION_BASIC
-    {
+    if compression_type != XEX_COMPRESSION_NONE && compression_type != XEX_COMPRESSION_BASIC {
         return Err(XexLoadError::UnsupportedCompression(compression_type));
     }
 
@@ -183,7 +181,6 @@ pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadErr
     })
 }
 
-
 fn decode_basic_compression(
     payload: &[u8],
     file_format: &[u8],
@@ -194,10 +191,14 @@ fn decode_basic_compression(
     } else {
         0x1_0000_usize
     };
-    let page_count = security.page_descriptors.iter().try_fold(0_usize, |total, descriptor| {
-        total.checked_add(descriptor.page_count as usize)
-            .ok_or(XexLoadError::InvalidPageLayout)
-    })?;
+    let page_count = security
+        .page_descriptors
+        .iter()
+        .try_fold(0_usize, |total, descriptor| {
+            total
+                .checked_add(descriptor.page_count as usize)
+                .ok_or(XexLoadError::InvalidPageLayout)
+        })?;
     let output_size = page_count
         .checked_mul(page_size)
         .ok_or(XexLoadError::InvalidPageLayout)?;
@@ -218,7 +219,9 @@ fn decode_basic_compression(
 
     let block_count = block_table_size / BASIC_BLOCK_ENTRY_SIZE;
     let mut output = Vec::new();
-    output.try_reserve_exact(output_size).map_err(|_| XexLoadError::AllocationFailed)?;
+    output
+        .try_reserve_exact(output_size)
+        .map_err(|_| XexLoadError::AllocationFailed)?;
     output.resize(output_size, 0);
 
     let mut source_offset = 0_usize;
@@ -384,7 +387,11 @@ mod tests {
         put_u16_be(&mut bytes, format_offset + 4, 0);
         put_u16_be(&mut bytes, format_offset + 6, 1);
         put_u32_be(&mut bytes, format_offset + 8, payload.len() as u32);
-        put_u32_be(&mut bytes, format_offset + 12, 0x1000 - payload.len() as u32);
+        put_u32_be(
+            &mut bytes,
+            format_offset + 12,
+            0x1000 - payload.len() as u32,
+        );
         bytes[header_size..].copy_from_slice(&payload);
         bytes
     }
@@ -394,7 +401,11 @@ mod tests {
         let loaded = load_xex2_uncompressed(&basic_fixture()).unwrap();
         assert_eq!(loaded.image.len(), 0x1000);
         assert_eq!(&loaded.image[..2], b"MZ");
-        assert!(loaded.image[valid_pe().len()..].iter().all(|byte| *byte == 0));
+        assert!(
+            loaded.image[valid_pe().len()..]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
         assert_eq!(loaded.layout.entry_point, 0x8200_1000);
     }
 
