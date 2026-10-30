@@ -500,7 +500,7 @@ impl PpcInterpreter {
                     }
                     24 | 536 | 792 | 824 => {
                         let source = left as u32 as i32;
-                        let shift = if xo == 824 {
+                        let shift = if extended_opcode == 824 {
                             rb as u32
                         } else {
                             (right as u32) & 0x3F
@@ -516,11 +516,11 @@ impl PpcInterpreter {
                             824 => if shift == 0 { left as u32 } else { (source >> shift) as u32 },
                             _ => unreachable!(),
                         };
-                        if xo == 792 || xo == 824 {
-                            let shifted_out = if shift == 0 || shift > 31 {
-                                false
-                            } else {
-                                ((left as u32) & ((1_u32 << shift) - 1)) != 0
+                        if extended_opcode == 792 || extended_opcode == 824 {
+                            let shifted_out = match shift {
+                                0 => false,
+                                1..=31 => ((left as u32) & ((1_u32 << shift) - 1)) != 0,
+                                _ => (left as u32) != 0,
                             };
                             self.set_carry(source < 0 && shifted_out);
                         }
@@ -528,7 +528,7 @@ impl PpcInterpreter {
                         if record { self.set_cr_field(0, (value as i32).cmp(&0)); }
                     }
                     26 | 58 | 954 | 922 | 986 => {
-                        let value = match xo {
+                        let value = match extended_opcode {
                             26 => (left as u32).leading_zeros() as u64,
                             58 => left.leading_zeros() as u64,
                             954 => (left as u8 as i8 as i64) as u64,
