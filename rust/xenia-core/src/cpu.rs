@@ -3226,7 +3226,7 @@ mod tests {
         put_instruction(&mut memory, 0x100C, encode_mcrfs(1, 1));
         put_instruction(&mut memory, 0x1010, encode_mtfsb(1, 38)); // cannot set FEX
         put_instruction(&mut memory, 0x1014, encode_mtfsb(2, 38)); // cannot set VX
-        put_instruction(&mut memory, 0x1018, encode_mcrfs(2, 4));
+        put_instruction(&mut memory, 0x1018, encode_mcrfs(2, 3));
 
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
@@ -3238,10 +3238,11 @@ mod tests {
             | (1 << 26)
             | (1 << 25)
             | (1 << 24)
+            | (1 << 19)
             | (1 << 18)
             | (1 << 17)
-            | 0x0000_4000
-            | (1 << 7); // VE enables FEX while VXSNAN is pending.
+            | 0x0001_4000
+            | (1 << 7); // VE enables FEX while VXSNAN and VXVC are pending.
 
         for _ in 0..7 {
             cpu.step(&mut memory).unwrap();
@@ -3249,10 +3250,10 @@ mod tests {
 
         assert_eq!(cpu.state.cr[0], 0x0F); // original FX/FEX/VX/OX
         assert_eq!(cpu.state.cr[1], 0x0F); // original UX/ZX/XX/VXSNAN
-        assert_eq!(cpu.state.cr[2], 0x0C); // FR/FI are copied, not cleared
+        assert_eq!(cpu.state.cr[2], 0x0F); // VXVC, FR, FI and C copied
         assert_eq!(cpu.state.fpscr & ((1 << 30) | (1 << 29)), 0); // summaries recomputed
-        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), (1 << 18) | (1 << 17));
-        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF preserved
+        assert_eq!(cpu.state.fpscr & ((1 << 18) | (1 << 17)), 0); // FR/FI cleared
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_4000); // C and FPCC preserved
     }
 
     #[test]
