@@ -198,7 +198,9 @@ impl PpcInterpreter {
             && operands[1] == 0.0
             && operands[0] != 0.0
             && operands[0].is_finite();
-        let overflow = value.is_infinite() && operands.iter().all(|operand| operand.is_finite());
+        let overflow = value.is_infinite()
+            && !div_zero
+            && operands.iter().all(|operand| operand.is_finite());
         let underflow = value != 0.0 && value.is_subnormal();
         self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, false, record);
     }
@@ -1168,12 +1170,15 @@ impl PpcInterpreter {
                         } else {
                             self.round_fp_to_integer(b)
                         };
-                        let (min, max) = if xo10 == 14 || xo10 == 15 {
-                            (i32::MIN as f64, i32::MAX as f64)
+                        let (min, max_exclusive) = if xo10 == 14 || xo10 == 15 {
+                            (i32::MIN as f64, (i32::MAX as f64) + 1.0)
                         } else {
-                            (i64::MIN as f64, i64::MAX as f64)
+                            (i64::MIN as f64, 9_223_372_036_854_775_808.0)
                         };
-                        if !rounded.is_finite() || rounded < min || rounded >= max {
+                        if !rounded.is_finite()
+                            || rounded < min
+                            || rounded >= max_exclusive
+                        {
                             self.update_fpscr_exceptions(true, false, false, false, false, record);
                             if xo10 == 14 || xo10 == 15 {
                                 i32::MIN as f64
