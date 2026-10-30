@@ -254,6 +254,26 @@ impl PpcInterpreter {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
                 let bi = ((instruction >> 16) & 0x1F) as usize;
                 let extended_opcode = (instruction >> 1) & 0x3FF;
+                if matches!(extended_opcode, 257 | 129 | 289 | 225 | 33 | 449 | 417 | 193) {
+                    let bt = bo as usize;
+                    let ba = bi;
+                    let bb = ((instruction >> 11) & 0x1F) as usize;
+                    let a = self.state.cr[ba / 4] & (1 << (3 - (ba % 4))) != 0;
+                    let b = self.state.cr[bb / 4] & (1 << (3 - (bb % 4))) != 0;
+                    match extended_opcode {
+                        257 => self.set_cr_bit(bt, a & b),
+                        129 => self.set_cr_bit(bt, a & !b),
+                        289 => self.set_cr_bit(bt, a == b),
+                        225 => self.set_cr_bit(bt, !(a & b)),
+                        33 => self.set_cr_bit(bt, !(a | b)),
+                        449 => self.set_cr_bit(bt, a | b),
+                        417 => self.set_cr_bit(bt, a | !b),
+                        193 => self.set_cr_bit(bt, a ^ b),
+                        _ => unreachable!(),
+                    }
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
                 let target = match extended_opcode {
                     16 => self.state.lr as u32 & !3,
                     528 => {
@@ -409,27 +429,6 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
-                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
-                }
-                self.state.pc = next_pc;
-            }
-            // Condition-register logical operations.
-            19 => {
-                let bt = ((instruction >> 21) & 0x1F) as usize;
-                let ba = ((instruction >> 16) & 0x1F) as usize;
-                let bb = ((instruction >> 11) & 0x1F) as usize;
-                let xo = (instruction >> 1) & 0x3FF;
-                let a = self.state.cr[ba / 4] & (1 << (3 - (ba % 4))) != 0;
-                let b = self.state.cr[bb / 4] & (1 << (3 - (bb % 4))) != 0;
-                match xo {
-                    257 => self.set_cr_bit(bt, a & b),
-                    129 => self.set_cr_bit(bt, a & !b),
-                    289 => self.set_cr_bit(bt, a == b),
-                    225 => self.set_cr_bit(bt, !(a & b)),
-                    33 => self.set_cr_bit(bt, !(a | b)),
-                    449 => self.set_cr_bit(bt, a | b),
-                    417 => self.set_cr_bit(bt, a | !b),
-                    193 => self.set_cr_bit(bt, a ^ b),
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.pc = next_pc;
