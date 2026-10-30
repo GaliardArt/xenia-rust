@@ -1296,7 +1296,7 @@ mod tests {
 
     #[test]
     fn divide_instructions_distinguish_word_doubleword_and_overflow_forms() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
         // divdu r5,r3,r4; divd r6,r3,r4; divwu r7,r3,r4; divw r8,r3,r4
         let encode = |rt: u32, xo: u32| {
             (31 << 26) | (rt << 21) | (3 << 16) | (4 << 11) | (xo << 1)
