@@ -384,12 +384,7 @@ impl PpcInterpreter {
         if fpscr & VX != 0 && fpscr & VE != 0 {
             causes |= VX | (fpscr & VX_CAUSES);
         }
-        for (status, enable, cause) in [
-            (OX, OE, OX),
-            (UX, UE, UX),
-            (ZX, ZE, ZX),
-            (XX, XE, XX),
-        ] {
+        for (status, enable, cause) in [(OX, OE, OX), (UX, UE, UX), (ZX, ZE, ZX), (XX, XE, XX)] {
             if fpscr & status != 0 && fpscr & enable != 0 {
                 causes |= cause;
             }
@@ -1405,7 +1400,8 @@ impl PpcInterpreter {
                         self.state.pc = next_pc;
                         if let Some(
                             exception @ PpcException::FloatingPoint {
-                                mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                                mode:
+                                    PpcFpExceptionMode::ImpreciseNonRecoverable
                                     | PpcFpExceptionMode::ImpreciseRecoverable,
                                 ..
                             },
@@ -5011,7 +5007,10 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.pending_exception(), None);
-        assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(1) as f64).to_bits());
+        assert_eq!(
+            cpu.state.fpr[1].to_bits(),
+            (f32::from_bits(1) as f64).to_bits()
+        );
         assert_eq!(cpu.state.fpscr & (1 << 27), 0); // exact subnormal: no UX
         assert_eq!(cpu.state.fpscr & (1 << 30), 0); // no enabled exception summary
     }
@@ -5252,11 +5251,7 @@ mod tests {
     fn mtmsr_fe_imprecise_transition_is_still_delivered_at_next_boundary() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // mtmsr r3; addi r4,r4,1
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (31 << 26) | (3 << 21) | (146 << 1),
-        );
+        put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
@@ -5271,7 +5266,10 @@ mod tests {
             mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
         };
         assert_eq!(cpu.pending_exception(), Some(pending));
-        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending))
+        );
         assert_eq!(cpu.state.pc, 0x1004);
         assert_eq!(cpu.state.gpr[4], 0);
     }
@@ -5317,7 +5315,10 @@ mod tests {
         assert_eq!(cpu.state.gpr[4], 1);
         assert_eq!(cpu.state.pc, 0x1008);
 
-        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending))
+        );
         assert_eq!(cpu.state.pc, 0x100C);
         assert_eq!(cpu.pending_exception(), Some(pending));
     }
@@ -5342,7 +5343,10 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         let pending = cpu.pending_exception().expect("imprecise FP event");
 
-        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending))
+        );
         assert_eq!(cpu.state.pc, 0x1008);
         assert_eq!(cpu.pending_exception(), Some(pending));
     }
@@ -5420,7 +5424,10 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
         let pending = cpu.pending_exception().expect("enabled FP exception");
-        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(pending))
+        );
         assert_eq!(cpu.state.pc, 0x1004);
         assert_eq!(cpu.pending_exception(), Some(pending));
     }
@@ -5612,7 +5619,10 @@ mod tests {
         assert_eq!(cpu.enter_pending_exception(), Some(exception));
 
         assert_eq!(cpu.state.srr0, 0x1008);
-        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(
+            cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION,
+            PPC_SRR1_FP_ENABLED_EXCEPTION
+        );
         assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, 0);
         assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
     }
@@ -5632,7 +5642,10 @@ mod tests {
         assert_eq!(cpu.enter_pending_exception(), Some(exception));
 
         assert_eq!(cpu.state.srr0, 0x2004);
-        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_FP_ENABLED_EXCEPTION);
+        assert_eq!(
+            cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION,
+            PPC_SRR1_FP_ENABLED_EXCEPTION
+        );
         assert_eq!(cpu.state.srr1 & PPC_SRR1_IMPRECISE, PPC_SRR1_IMPRECISE);
         assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
     }
