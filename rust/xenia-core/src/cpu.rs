@@ -3819,6 +3819,13 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1000,
+                causes: 1 << 28, // OX
+            })
+        );
         assert!(cpu.state.fpr[1].is_finite());
         assert!(cpu.state.fpr[1] > 0.0);
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
@@ -3874,6 +3881,13 @@ mod tests {
         cpu.state.fpscr = 1 << 6; // OE
 
         cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1000,
+                causes: 1 << 28, // OX
+            })
+        );
         assert!(cpu.state.fpr[1].is_finite());
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
@@ -3881,6 +3895,13 @@ mod tests {
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = 1 << 5; // UE
         cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1004,
+                causes: 1 << 27, // UX
+            })
+        );
         assert_eq!(cpu.state.fpr[4], 2.0_f64.powi(462));
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
