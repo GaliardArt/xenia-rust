@@ -1328,14 +1328,7 @@ impl PpcInterpreter {
                         };
                         let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
                         if matches!(xo10, 14 | 15 | 814 | 815) {
-                            self.update_fpscr_exceptions(
-                                false,
-                                false,
-                                false,
-                                false,
-                                inexact,
-                                record,
-                            );
+                            self.update_fpscr_exceptions(false, false, false, false, inexact, record);
                         } else {
                             self.update_fpscr_for_result(value, operands, inexact, record);
                         }
