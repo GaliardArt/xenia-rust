@@ -1100,7 +1100,7 @@ impl PpcInterpreter {
                     }
                     38 | 70 => {
                         // mtfsb1 / mtfsb0
-                        let bit = ((instruction >> 21) & 0x1F) as u32;
+                        let bit = (instruction >> 21) & 0x1F;
                         let mask = 1_u32 << (31 - bit);
                         if xo10 == 38 {
                             self.state.fpscr |= mask;
