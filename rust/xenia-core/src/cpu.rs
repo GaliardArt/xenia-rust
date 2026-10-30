@@ -1263,7 +1263,7 @@ impl PpcInterpreter {
                         let value = if extended_opcode == 535 || extended_opcode == 567 {
                             Self::extend_single_preserving_nan(f32::from_bits(
                                 memory
-                                    .read_u32_be()
+                                    .read_u32_be(GuestAddress(address))
                                     .map_err(Into::into)?,
                             ))
                         } else {
