@@ -217,14 +217,16 @@ impl PpcInterpreter {
     ) {
         let has_nan_operand = operands.iter().any(|operand| operand.is_nan());
         let invalid = value.is_nan()
-            && (!has_nan_operand || operands.iter().any(|operand| Self::is_signaling_nan(*operand)));
+            && (!has_nan_operand
+                || operands
+                    .iter()
+                    .any(|operand| Self::is_signaling_nan(*operand)));
         let div_zero = operands.len() >= 2
             && operands[1] == 0.0
             && operands[0] != 0.0
             && operands[0].is_finite();
-        let overflow = value.is_infinite()
-            && !div_zero
-            && operands.iter().all(|operand| operand.is_finite());
+        let overflow =
+            value.is_infinite() && !div_zero && operands.iter().all(|operand| operand.is_finite());
         let underflow = value != 0.0 && value.is_subnormal();
         self.update_fpscr_exceptions(invalid, div_zero, overflow, underflow, inexact, record);
     }
@@ -1186,10 +1188,10 @@ impl PpcInterpreter {
                 let mut arithmetic = false;
                 let mut update_status = false;
                 let value = match xo10 {
-                    264 => b.abs(),          // fabs
-                    72 => b,                 // fmr
-                    136 => -b.abs(),         // fnabs
-                    40 => -b,                // fneg
+                    264 => b.abs(),  // fabs
+                    72 => b,         // fmr
+                    136 => -b.abs(), // fnabs
+                    40 => -b,        // fneg
                     12 => {
                         update_status = true;
                         (b as f32) as f64
@@ -1207,10 +1209,7 @@ impl PpcInterpreter {
                             (i64::MIN as f64, 9_223_372_036_854_775_808.0)
                         };
                         update_status = true;
-                        if !rounded.is_finite()
-                            || rounded < min
-                            || rounded >= max_exclusive
-                        {
+                        if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
                             self.update_fpscr_exceptions(true, false, false, false, false, record);
                             if xo10 == 14 || xo10 == 15 {
                                 i32::MIN as f64
