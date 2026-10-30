@@ -254,7 +254,10 @@ impl PpcInterpreter {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
                 let bi = ((instruction >> 16) & 0x1F) as usize;
                 let extended_opcode = (instruction >> 1) & 0x3FF;
-                if matches!(extended_opcode, 257 | 129 | 289 | 225 | 33 | 449 | 417 | 193) {
+                if matches!(
+                    extended_opcode,
+                    257 | 129 | 289 | 225 | 33 | 449 | 417 | 193
+                ) {
                     let bt = bo as usize;
                     let ba = bi;
                     let bb = ((instruction >> 11) & 0x1F) as usize;
@@ -414,8 +417,12 @@ impl PpcInterpreter {
                             ((dividend / divisor) as u64, false)
                         };
                         self.state.gpr[rt_rs] = value;
-                        if oe { self.update_overflow(overflow); }
-                        if record { self.set_cr_field(0, (value as i64).cmp(&0)); }
+                        if oe {
+                            self.update_overflow(overflow);
+                        }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
                     }
                     28 | 316 | 444 => {
                         let value = match extended_opcode {
