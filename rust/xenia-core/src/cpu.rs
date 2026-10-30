@@ -300,8 +300,7 @@ impl PpcInterpreter {
             18 if operands.len() >= 2 && operands[0] == 0.0 && operands[1] == 0.0 => {
                 invalid_cause |= 1 << 21; // VXZDZ
             }
-            18 if operands.len() >= 2 && operands[0].is_infinite() && operands[1].is_infinite() =>
-            {
+            18 if operands.len() >= 2 && operands[0].is_infinite() && operands[1].is_infinite() => {
                 invalid_cause |= 1 << 22; // VXIDI
             }
             20 if operands.len() >= 2
@@ -688,8 +687,7 @@ impl PpcInterpreter {
                     scaled_a = -scaled_a;
                 }
                 let intermediate = scaled_a * scaled_c;
-                let rounded =
-                    self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
+                let rounded = self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
                 (rounded.0, rounded.1, rounded.2)
             }
             _ => (Self::scale_by_power_of_two(result, 1536), false, false),
@@ -2064,7 +2062,11 @@ impl PpcInterpreter {
                         && rounded != 0.0
                         && rounded.abs() < f32::MIN_POSITIVE as f64;
                     if ni_flush {
-                        rounded = if rounded.is_sign_negative() { -0.0 } else { 0.0 };
+                        rounded = if rounded.is_sign_negative() {
+                            -0.0
+                        } else {
+                            0.0
+                        };
                     }
                     let previous_fpr = self.state.fpr[frt];
                     self.state.fpr[frt] = rounded;
@@ -3262,11 +3264,7 @@ mod tests {
     fn mtfsb1_sets_fx_when_it_raises_an_invalid_cause() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtfsb1 VXSQRT (FPSCR bit 22 in PowerPC numbering)
-        put_instruction(
-            &mut memory,
-            0x1000,
-            (63 << 26) | (22 << 21) | (38 << 1),
-        );
+        put_instruction(&mut memory, 0x1000, (63 << 26) | (22 << 21) | (38 << 1));
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
 
