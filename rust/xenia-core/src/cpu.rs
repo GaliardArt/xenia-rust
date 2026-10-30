@@ -644,6 +644,56 @@ impl PpcInterpreter {
         (adjusted, true, fraction_rounded, false)
     }
 
+    fn round_double_underflow_enabled(
+        &self,
+        operation: u32,
+        a: f64,
+        b: f64,
+        c: f64,
+        result: f64,
+    ) -> (f64, bool, bool) {
+        match operation {
+            18 => {
+                let numerator_exponent = a.abs().log2().floor() as i32;
+                let (scaled_a, scaled_b) = if numerator_exponent <= -513 {
+                    (Self::scale_by_power_of_two(a, 1536), b)
+                } else {
+                    (a, Self::scale_by_power_of_two(b, -1536))
+                };
+                let intermediate = scaled_a / scaled_b;
+                let rounded =
+                    self.round_binary64_result(18, scaled_a, scaled_b, 0.0, intermediate);
+                (rounded.0, rounded.1, rounded.2)
+            }
+            25 => {
+                let (scaled_a, scaled_c) = if a.abs() <= c.abs() {
+                    (Self::scale_by_power_of_two(a, 1536), c)
+                } else {
+                    (a, Self::scale_by_power_of_two(c, 1536))
+                };
+                let intermediate = scaled_a * scaled_c;
+                let rounded =
+                    self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
+                (rounded.0, rounded.1, rounded.2)
+            }
+            28..=31 if b == 0.0 => {
+                let (mut scaled_a, scaled_c) = if a.abs() <= c.abs() {
+                    (Self::scale_by_power_of_two(a, 1536), c)
+                } else {
+                    (a, Self::scale_by_power_of_two(c, 1536))
+                };
+                if matches!(operation, 30 | 31) {
+                    scaled_a = -scaled_a;
+                }
+                let intermediate = scaled_a * scaled_c;
+                let rounded =
+                    self.round_binary64_result(25, scaled_a, 0.0, scaled_c, intermediate);
+                (rounded.0, rounded.1, rounded.2)
+            }
+            _ => (Self::scale_by_power_of_two(result, 1536), false, false),
+        }
+    }
+
     fn round_double_overflow_enabled(
         &self,
         operation: u32,
@@ -1930,6 +1980,19 @@ impl PpcInterpreter {
                         double_inexact = adjusted.1;
                         double_fraction_rounded = adjusted.2;
                     }
+                    let double_tiny =
+                        value.is_subnormal() || (value == 0.0 && double_inexact);
+                    let double_underflow = double_tiny
+                        && ((self.state.fpscr & (1 << 5) != 0) || double_inexact);
+                    if double_underflow && self.state.fpscr & (1 << 5) != 0 {
+                        let adjusted =
+                            self.round_double_underflow_enabled(xo5, a, b, c, value);
+                        value = adjusted.0;
+                        if matches!(xo5, 18 | 25) || (matches!(xo5, 28..=31) && b == 0.0) {
+                            double_inexact = adjusted.1;
+                            double_fraction_rounded = adjusted.2;
+                        }
+                    }
                 }
 
                 if xo5 == 23 && !update_status {
@@ -2066,7 +2129,7 @@ impl PpcInterpreter {
                                     frsp_fraction_rounded
                                 },
                                 double_overflow || frsp_overflow,
-                                frsp_underflow,
+                                double_underflow || frsp_underflow,
                                 xo10 == 12,
                                 record,
                             );
