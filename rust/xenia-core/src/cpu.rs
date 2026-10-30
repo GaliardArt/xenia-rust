@@ -724,7 +724,7 @@ impl PpcInterpreter {
                 self.state.pc = next_pc;
             }
             // Floating-point displacement loads/stores.
-            48 | 49 | 50 | 51 => {
+            48..=51 => {
                 let update = matches!(opcode, 49 | 51);
                 if update && (ra == 0 || ra == rt_rs) {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
@@ -758,7 +758,7 @@ impl PpcInterpreter {
                 }
                 self.state.pc = next_pc;
             }
-            52 | 53 | 54 | 55 => {
+            52..=55 => {
                 let update = matches!(opcode, 53 | 55);
                 if update && ra == 0 {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
