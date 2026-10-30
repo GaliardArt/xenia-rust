@@ -2390,6 +2390,26 @@ mod tests {
             cpu.state.fpr[1].to_bits(),
             (f32::from_bits(0xBF80_0001) as f64).to_bits()
         );
+        assert_ne!(cpu.state.fpscr & (1 << 18), 0); // FR: rounded away from zero.
+
+        // A finite binary64 value that overflows binary32 must still obey
+        // directed rounding instead of unconditionally becoming infinity.
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::MAX;
+        cpu.state.fpscr = 0b01; // toward zero
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], f32::MAX as f64);
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10; // toward +infinity
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], f64::INFINITY);
+
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -f64::MAX;
+        cpu.state.fpscr = 0b10; // toward +infinity, negative magnitude decreases
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], -(f32::MAX as f64));
     }
 
     #[test]
