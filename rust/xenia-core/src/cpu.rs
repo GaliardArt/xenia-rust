@@ -2325,6 +2325,38 @@ mod tests {
     }
 
     #[test]
+    fn frsp_obeys_all_fpscr_rounding_directions() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // frsp f1,f2
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 11) | (12 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
+
+        // Round to nearest, ties to even.
+        cpu.state.fpscr = 0;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), 1.0_f64.to_bits());
+
+        // Round toward +infinity.
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 0b10;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), f32::from_bits(0x3F80_0001) as f64 as u64);
+
+        // Round a negative halfway value toward -infinity.
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = -1.0 - 2.0_f64.powi(-24);
+        cpu.state.fpscr = 0b11;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1].to_bits(), f32::from_bits(0xBF80_0001) as f64 as u64);
+    }
+
+    #[test]
     fn floating_point_invalid_arithmetic_sets_specific_fpscr_causes() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         // fdiv f1,f2,f3 (0/0); fsqrt f4,f5 (-1); fmul f6,f7,f8 (inf*0)
