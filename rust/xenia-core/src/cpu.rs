@@ -605,14 +605,14 @@ impl PpcInterpreter {
                 let c = self.state.fpr[frc];
 
                 let (value, updates_fpr) = match xo10 {
-                    264 => (b.abs(), true),                 // fabs
-                    72 => (b, true),                        // fmr
-                    136 => (-b.abs(), true),                // fnabs
-                    40 => (-b, true),                       // fneg
-                    12 => ((b as f32) as f64, true),        // frsp
-                    14 => (b as i32 as f64, true),          // fctiw (approximation)
-                    15 => (b.trunc() as i32 as f64, true),  // fctiwz
-                    583 => (self.state.fpscr as f64, true), // mffs
+                    264 => (b.abs(), true),                  // fabs
+                    72 => (b, true),                         // fmr
+                    136 => (-b.abs(), true),                 // fnabs
+                    40 => (-b, true),                        // fneg
+                    12 => ((b as f32) as f64, true),         // frsp
+                    14 => (b as i32 as f64, true),           // fctiw (approximation)
+                    15 => (b.trunc() as i32 as f64, true),    // fctiwz
+                    583 => (self.state.fpscr as f64, true),  // mffs
                     0 | 32 => {
                         let field = ((instruction >> 23) & 0x7) as usize;
                         let condition = if a.is_nan() || b.is_nan() {
