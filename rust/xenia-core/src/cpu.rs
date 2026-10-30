@@ -4626,14 +4626,15 @@ mod tests {
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
 
-        cpu.step(&mut memory).unwrap();
-
         let expected = PpcException::FloatingPoint {
             pc: 0x1000,
             causes: (1 << 29) | (1 << 21), // VX | VXZDZ
         };
-        assert_eq!(cpu.pending_exception(), Some(expected));
-        assert_eq!(cpu.take_pending_exception(), Some(expected));
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::GuestException(expected))
+        );
+        assert_eq!(cpu.pending_exception(), None);
         assert_eq!(cpu.take_pending_exception(), None);
     }
 
