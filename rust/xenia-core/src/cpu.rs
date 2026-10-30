@@ -467,7 +467,7 @@ impl PpcInterpreter {
                             75 => {
                                 let a = left as u32 as i32 as i64;
                                 let b = right as u32 as i32 as i64;
-                                ((a * b) >> 32) as u32 as u64
+                                ((a * b) >> 32) as u64
                             }
                             _ => unreachable!(),
                         };
@@ -1383,6 +1383,14 @@ mod tests {
         assert_eq!(cpu.state.gpr[5], 0xFFFF_FFFE);
         assert_eq!(cpu.state.gpr[6], 0);
 
+        // mulhw writes the signed high-word result sign-extended to 64 bits.
+        cpu.state.pc = 0x1004;
+        cpu.state.gpr[3] = (-2_i64) as u64;
+        cpu.state.gpr[4] = 1;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[6], u64::MAX);
+
+        cpu.state.pc = 0x1008;
         cpu.state.gpr[3] = u64::MAX;
         cpu.state.gpr[4] = u64::MAX;
         for _ in 0..2 {
