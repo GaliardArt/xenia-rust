@@ -199,6 +199,24 @@ impl PpcInterpreter {
         Some(exception)
     }
 
+    /// Executes one instruction and automatically enters the Program Exception
+    /// vector when an FP exception reaches its architectural delivery boundary.
+    /// Returns the delivered exception so the host can log or inspect it.
+    pub fn step_and_dispatch<M>(
+        &mut self,
+        memory: &mut M,
+    ) -> Result<Option<PpcException>, PpcError>
+    where
+        M: GuestMemoryAccess,
+        M::Error: Into<PpcError>,
+    {
+        match self.step(memory) {
+            Ok(()) => Ok(None),
+            Err(PpcError::PendingException(_)) => Ok(self.enter_pending_exception()),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Returns an ordinary imprecise FP event that must be delivered before
     /// an FPSCR instruction begins. FPSCR instructions serialize prior
     /// floating-point work, including its enabled-exception handler.
@@ -5727,4 +5745,37 @@ mod tests {
         assert_eq!(cpu.state.msr, 0xA123_4567_89AB_CDEF);
         assert_eq!(cpu.state.pc, 0x1004);
     }
+    #[test]
+    fn step_and_dispatch_enters_program_vector_after_precise_fp_fault() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fdiv f1,f2,f3; addi r4,r4,1 (must not execute before exception entry).
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.fpscr = 1 << 4; // ZE
+        cpu.state.fpr[2] = 1.0;
+        cpu.state.fpr[3] = 0.0;
+
+        assert_eq!(cpu.step_and_dispatch(&mut memory), Ok(None));
+        let delivered = cpu.step_and_dispatch(&mut memory).unwrap();
+
+        assert!(matches!(
+            delivered,
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                mode: PpcFpExceptionMode::Precise,
+                ..
+            })
+        ));
+        assert_eq!(cpu.state.pc, PPC_PROGRAM_EXCEPTION_VECTOR);
+        assert_eq!(cpu.state.srr0, 0x1000);
+        assert_eq!(cpu.state.gpr[4], 0);
+    }
+
 }
