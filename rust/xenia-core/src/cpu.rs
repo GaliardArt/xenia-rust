@@ -1641,11 +1641,12 @@ mod tests {
 
     #[test]
     fn lmw_does_not_partially_update_registers_when_a_later_read_faults() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
-        put_instruction(&mut memory, 0x1000, (46 << 26) | (30 << 21));
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        put_instruction(&mut memory, 0x1000, (46 << 26) | (30 << 21) | (3 << 16));
         memory.write_u32_be(GuestAddress(0x1004), 0x1111_1111).unwrap();
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1004;
         cpu.state.gpr[30] = 0xAAAA_AAAA;
         cpu.state.gpr[31] = 0xBBBB_BBBB;
 
