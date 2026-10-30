@@ -1865,17 +1865,25 @@ impl PpcInterpreter {
                             b
                         };
                         let adjusted = overflow_enabled || underflow_enabled;
-                        let rounded = if adjusted {
+                        let mut rounded = if adjusted {
                             self.round_to_single_significand(adjusted_value)
                         } else {
                             self.round_to_single(b)
                         };
-                        frsp_inexact = if adjusted {
-                            rounded != adjusted_value
-                        } else {
-                            (b.is_finite() && rounded.is_finite() && rounded != b)
-                                || (frsp_overflow && !overflow_enabled)
-                        };
+                        let ni_flush = !underflow_enabled
+                            && self.state.fpscr & (1 << 2) != 0
+                            && rounded != 0.0
+                            && rounded.abs() < f32::MIN_POSITIVE as f64;
+                        if ni_flush {
+                            rounded = if rounded.is_sign_negative() { -0.0 } else { 0.0 };
+                        }
+                        frsp_inexact = ni_flush
+                            || if adjusted {
+                                rounded != adjusted_value
+                            } else {
+                                (b.is_finite() && rounded.is_finite() && rounded != b)
+                                    || (frsp_overflow && !overflow_enabled)
+                            };
                         frsp_underflow = tiny && (underflow_enabled || frsp_inexact);
                         frsp_fraction_rounded = !frsp_overflow
                             && if adjusted {
@@ -1988,9 +1996,18 @@ impl PpcInterpreter {
                     let double_tiny = value.is_subnormal()
                         || (value == 0.0 && double_inexact)
                         || (value.abs() == f64::MIN_POSITIVE && double_fraction_rounded);
-                    double_underflow = double_tiny
-                        && ((self.state.fpscr & (1 << 5) != 0) || double_inexact);
-                    if double_underflow && self.state.fpscr & (1 << 5) != 0 {
+                    let underflow_enabled = self.state.fpscr & (1 << 5) != 0;
+                    if !underflow_enabled
+                        && self.state.fpscr & (1 << 2) != 0
+                        && value.is_subnormal()
+                    {
+                        value = if value.is_sign_negative() { -0.0 } else { 0.0 };
+                        double_inexact = true;
+                        double_fraction_rounded = false;
+                    }
+                    double_underflow =
+                        double_tiny && (underflow_enabled || double_inexact);
+                    if double_underflow && underflow_enabled {
                         let adjusted =
                             self.round_double_underflow_enabled(xo5, a, b, c, value);
                         value = adjusted.0;
@@ -2037,20 +2054,28 @@ impl PpcInterpreter {
                         value
                     };
                     let adjusted_exponent = overflow_enabled || underflow_enabled;
-                    let rounded = if adjusted_exponent {
+                    let mut rounded = if adjusted_exponent {
                         self.round_to_single_significand(adjusted_value)
                     } else {
                         self.round_to_single(value)
                     };
+                    let ni_flush = !underflow_enabled
+                        && self.state.fpscr & (1 << 2) != 0
+                        && rounded != 0.0
+                        && rounded.abs() < f32::MIN_POSITIVE as f64;
+                    if ni_flush {
+                        rounded = if rounded.is_sign_negative() { -0.0 } else { 0.0 };
+                    }
                     let previous_fpr = self.state.fpr[frt];
                     self.state.fpr[frt] = rounded;
                     if update_status {
-                        let inexact = if adjusted_exponent {
-                            rounded != adjusted_value
-                        } else {
-                            (value.is_finite() && rounded.is_finite() && rounded != value)
-                                || (overflow && !overflow_enabled)
-                        };
+                        let inexact = ni_flush
+                            || if adjusted_exponent {
+                                rounded != adjusted_value
+                            } else {
+                                (value.is_finite() && rounded.is_finite() && rounded != value)
+                                    || (overflow && !overflow_enabled)
+                            };
                         let fraction_rounded = if overflow {
                             false
                         } else if adjusted_exponent {
