@@ -62,6 +62,16 @@ impl From<AddressSpaceError> for PpcError {
 }
 
 /// Executes a small subset of PPC instructions against guest memory.
+#[derive(Clone, Copy, Debug, Default)]
+struct FpExceptionFlags {
+    invalid: bool,
+    div_zero: bool,
+    overflow: bool,
+    underflow: bool,
+    inexact: bool,
+    invalid_cause: u32,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PpcInterpreter {
     pub state: PpcState,
@@ -160,16 +170,7 @@ impl PpcInterpreter {
         }
     }
 
-    fn update_fpscr_exceptions(
-        &mut self,
-        invalid: bool,
-        div_zero: bool,
-        overflow: bool,
-        underflow: bool,
-        inexact: bool,
-        invalid_cause: u32,
-        record: bool,
-    ) {
+    fn update_fpscr_exceptions(&mut self, exceptions: FpExceptionFlags, record: bool) {
         const FX: u32 = 1 << 31;
         const VX: u32 = 1 << 29;
         const OX: u32 = 1 << 28;
@@ -180,23 +181,23 @@ impl PpcInterpreter {
         const FI: u32 = 1 << 17;
 
         self.state.fpscr &= !(FR | FI);
-        if inexact {
+        if exceptions.inexact {
             self.state.fpscr |= FI;
         }
         let mut raised = 0;
-        if invalid {
-            raised |= VX | invalid_cause;
+        if exceptions.invalid {
+            raised |= VX | exceptions.invalid_cause;
         }
-        if div_zero {
+        if exceptions.div_zero {
             raised |= ZX;
         }
-        if overflow {
+        if exceptions.overflow {
             raised |= OX;
         }
-        if underflow {
+        if exceptions.underflow {
             raised |= UX;
         }
-        if inexact {
+        if exceptions.inexact {
             raised |= XX;
         }
         if raised != 0 {
@@ -299,12 +300,14 @@ impl PpcInterpreter {
         }
         self.set_fprf_for_value(value);
         self.update_fpscr_exceptions(
-            invalid,
-            div_zero,
-            overflow,
-            underflow,
-            inexact || overflow,
-            invalid_cause,
+            FpExceptionFlags {
+                invalid,
+                div_zero,
+                overflow,
+                underflow,
+                inexact: inexact || overflow,
+                invalid_cause,
+            },
             record,
         );
     }
@@ -1313,7 +1316,14 @@ impl PpcInterpreter {
                     if unordered && xo10 == 32 {
                         self.state.fpscr |= 1 << 19; // VXVC
                     }
-                    self.update_fpscr_exceptions(invalid, false, false, false, false, 0, false);
+                    self.update_fpscr_exceptions(
+                        FpExceptionFlags {
+                            invalid,
+                            invalid_cause: 0,
+                            ..FpExceptionFlags::default()
+                        },
+                        false,
+                    );
                     self.state.pc = next_pc;
                     return Ok(());
                 }
@@ -1345,12 +1355,11 @@ impl PpcInterpreter {
                         if !rounded.is_finite() || rounded < min || rounded >= max_exclusive {
                             self.state.fpscr |= 1 << 8; // VXCVI
                             self.update_fpscr_exceptions(
-                                true,
-                                false,
-                                false,
-                                false,
-                                false,
-                                1 << 8,
+                                FpExceptionFlags {
+                                    invalid: true,
+                                    invalid_cause: 1 << 8,
+                                    ..FpExceptionFlags::default()
+                                },
                                 record,
                             );
                             if xo10 == 14 || xo10 == 15 {
@@ -1441,7 +1450,11 @@ impl PpcInterpreter {
                         let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
                         if matches!(xo10, 14 | 15 | 814 | 815) {
                             self.update_fpscr_exceptions(
-                                false, false, false, false, inexact, 0, record,
+                                FpExceptionFlags {
+                                    inexact,
+                                    ..FpExceptionFlags::default()
+                                },
+                                record,
                             );
                         } else {
                             self.update_fpscr_for_result(value, operands, xo5, inexact, record);
