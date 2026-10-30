@@ -4789,6 +4789,57 @@ mod tests {
     }
 
     #[test]
+    fn mtfsfi_enabling_existing_fpscr_cause_raises_fp_exception() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsfi 6,8: set FPSCR[VE] while VXZDZ is already sticky.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (6 << 23) | (8 << 12) | (134 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 1 << 21; // VXZDZ, VE initially clear
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                causes: (1 << 29) | (1 << 21),
+                mode: PpcFpExceptionMode::Precise,
+            })
+        );
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsfi
+        assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX derived after VE is enabled
+    }
+
+    #[test]
+    fn mtfsb1_setting_invalid_cause_raises_fp_exception() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // mtfsb1 10: set FPSCR[VXZDZ].
+        put_instruction(&mut memory, 0x1000, (63 << 26) | (10 << 21) | (38 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpscr = 1 << 7; // VE already enabled
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.pending_exception(),
+            Some(PpcException::FloatingPoint {
+                instruction_pc: 0x1000,
+                causes: (1 << 29) | (1 << 21),
+                mode: PpcFpExceptionMode::Precise,
+            })
+        );
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX set by mtfsb1
+    }
+
+    #[test]
     fn msr_fe_bits_decode_all_four_powerpc_exception_modes() {
         let mut cpu = PpcInterpreter::default();
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Disabled);
