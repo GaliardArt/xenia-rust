@@ -896,6 +896,36 @@ impl PpcInterpreter {
                 }
                 self.state.pc = next_pc;
             }
+            // lmw/stmw transfer the selected GPR range in ascending register order.
+            // Stage lmw values before committing them so a failed memory read cannot
+            // leave only part of the architectural register range modified.
+            46 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let address = base.wrapping_add(immediate as u32);
+                let mut loaded = [0_u64; 32];
+                for register in rt_rs..32 {
+                    let offset = ((register - rt_rs) as u32).wrapping_mul(4);
+                    loaded[register] = memory
+                        .read_u32_be(GuestAddress(address.wrapping_add(offset)))
+                        .map_err(Into::into)? as u64;
+                }
+                self.state.gpr[rt_rs..32].copy_from_slice(&loaded[rt_rs..32]);
+                self.state.pc = next_pc;
+            }
+            47 => {
+                let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                let address = base.wrapping_add(immediate as u32);
+                for register in rt_rs..32 {
+                    let offset = ((register - rt_rs) as u32).wrapping_mul(4);
+                    memory
+                        .write_u32_be(
+                            GuestAddress(address.wrapping_add(offset)),
+                            self.state.gpr[register] as u32,
+                        )
+                        .map_err(Into::into)?;
+                }
+                self.state.pc = next_pc;
+            }
             // Floating-point execution: A-form arithmetic and common X-form operations.
             59 | 63 => {
                 let frt = rt_rs;
@@ -1577,6 +1607,55 @@ mod tests {
         assert_ne!(cpu.state.xer & (1 << 29), 0);
         assert_eq!(cpu.state.gpr[9], 0xFFFF_FFFF_FFFF_8001);
         assert_eq!(cpu.state.gpr[11], 31);
+    }
+
+    #[test]
+    fn lmw_and_stmw_transfer_register_ranges_in_big_endian_order() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x100);
+        // lmw r28,0(r3); stmw r30,16(r3)
+        put_instruction(&mut memory, 0x1000, (46 << 26) | (28 << 21) | (3 << 16));
+        put_instruction(&mut memory, 0x1004, (47 << 26) | (30 << 21) | (3 << 16) | 16);
+        for register in 28..32 {
+            memory
+                .write_u32_be(
+                    GuestAddress(0x1020 + ((register - 28) * 4)),
+                    0xA000_0000 | register,
+                )
+                .unwrap();
+        }
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1020;
+
+        cpu.step(&mut memory).unwrap();
+        for register in 28..32 {
+            assert_eq!(cpu.state.gpr[register], 0xA000_0000 | register as u64);
+        }
+        cpu.state.gpr[30] = 0x1122_3344;
+        cpu.state.gpr[31] = 0x5566_7788;
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(memory.read_u32_be(GuestAddress(0x1030)), Ok(0x1122_3344));
+        assert_eq!(memory.read_u32_be(GuestAddress(0x1034)), Ok(0x5566_7788));
+    }
+
+    #[test]
+    fn lmw_does_not_partially_update_registers_when_a_later_read_faults() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        put_instruction(&mut memory, 0x1000, (46 << 26) | (30 << 21));
+        memory.write_u32_be(GuestAddress(0x1004), 0x1111_1111).unwrap();
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[30] = 0xAAAA_AAAA;
+        cpu.state.gpr[31] = 0xBBBB_BBBB;
+
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::Memory(MemoryError::OutOfBounds))
+        );
+        assert_eq!(cpu.state.gpr[30], 0xAAAA_AAAA);
+        assert_eq!(cpu.state.gpr[31], 0xBBBB_BBBB);
+        assert_eq!(cpu.state.pc, 0x1000);
     }
 
     #[test]
