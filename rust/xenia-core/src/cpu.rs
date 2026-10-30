@@ -3193,7 +3193,7 @@ mod tests {
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
         );
         cpu.state.pc = 0x1000;
-        cpu.state.fpscr = 0xB000_0280; // VXSQRT + VE retain VX/FEX summaries
+        cpu.state.fpscr = 0xF000_0280; // Seed FX/FEX/VX/OX for the CR1 copy check
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[1], 0x0F); // FX, FEX, VX and OX
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
