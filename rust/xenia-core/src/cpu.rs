@@ -317,7 +317,11 @@ impl PpcInterpreter {
             return f32::from_bits(1);
         }
         let bits = value.to_bits();
-        f32::from_bits(if value.is_sign_positive() { bits + 1 } else { bits - 1 })
+        f32::from_bits(if value.is_sign_positive() {
+            bits + 1
+        } else {
+            bits - 1
+        })
     }
 
     fn next_down_f32(value: f32) -> f32 {
@@ -328,7 +332,11 @@ impl PpcInterpreter {
             return f32::from_bits(0x8000_0001);
         }
         let bits = value.to_bits();
-        f32::from_bits(if value.is_sign_positive() { bits - 1 } else { bits + 1 })
+        f32::from_bits(if value.is_sign_positive() {
+            bits - 1
+        } else {
+            bits + 1
+        })
     }
 
     fn round_to_single(&self, value: f64) -> f64 {
@@ -2349,14 +2357,20 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0b10;
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(0x3F80_0001) as f64).to_bits());
+        assert_eq!(
+            cpu.state.fpr[1].to_bits(),
+            (f32::from_bits(0x3F80_0001) as f64).to_bits()
+        );
 
         // Round a negative halfway value toward -infinity.
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -1.0 - 2.0_f64.powi(-24);
         cpu.state.fpscr = 0b11;
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(0xBF80_0001) as f64).to_bits());
+        assert_eq!(
+            cpu.state.fpr[1].to_bits(),
+            (f32::from_bits(0xBF80_0001) as f64).to_bits()
+        );
     }
 
     #[test]
