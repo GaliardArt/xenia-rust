@@ -389,6 +389,33 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
+                    200 | 202 | 232 | 234 | 712 | 714 | 744 | 746 => {
+                        // subfze/subfme/addze/addme and their OE variants.
+                        let carry_in = (self.state.xer >> 29) & 1;
+                        let addend = match xo {
+                            200 | 232 => !left,
+                            202 | 234 => left,
+                            _ => unreachable!(),
+                        };
+                        let minus_one = matches!(xo, 232 | 234);
+                        let second = if minus_one { u64::MAX } else { 0 };
+                        let (partial, carry_a) = addend.overflowing_add(second);
+                        let (value, carry_b) = partial.overflowing_add(carry_in);
+                        let signed_base = addend as i64 as i128;
+                        let signed_second = if minus_one { -1_i128 } else { 0_i128 };
+                        let signed_result = signed_base + signed_second + carry_in as i128;
+                        self.state.gpr[rt_rs] = value;
+                        self.set_carry(carry_a || carry_b);
+                        if oe {
+                            self.update_overflow(
+                                signed_result < i64::MIN as i128
+                                    || signed_result > i64::MAX as i128,
+                            );
+                        }
+                        if record {
+                            self.set_cr_field(0, (value as i64).cmp(&0));
+                        }
+                    }
                     104 | 616 => {
                         let value = self.state.gpr[ra].wrapping_neg();
                         let overflow = self.state.gpr[ra] == (1_u64 << 63);
@@ -1337,6 +1364,32 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.gpr[11], 0);
         assert_ne!(cpu.state.xer & (1 << 30), 0);
+    }
+
+    #[test]
+    fn addme_addze_subfme_and_subfze_use_xer_carry() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode = |rt: u32, ra: u32, xo: u32| {
+            (31 << 26) | (rt << 21) | (ra << 16) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode(5, 3, 234)); // addme r5,r3
+        put_instruction(&mut memory, 0x1004, encode(6, 3, 202)); // addze r6,r3
+        put_instruction(&mut memory, 0x1008, encode(7, 3, 232)); // subfme r7,r3
+        put_instruction(&mut memory, 0x100C, encode(8, 3, 200)); // subfze r8,r3
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 5;
+        cpu.state.xer = 1 << 29; // CA=1
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[5], 5); // 5 + 1 - 1
+        assert_eq!(cpu.state.gpr[6], 6); // 5 + 1
+        assert_eq!(cpu.state.gpr[7], !5_u64); // ~5 + 1 - 1
+        assert_eq!(cpu.state.gpr[8], !5_u64 + 1); // ~5 + 1
     }
 
     #[test]
