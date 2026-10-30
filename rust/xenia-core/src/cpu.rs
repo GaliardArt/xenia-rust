@@ -1122,8 +1122,8 @@ impl PpcInterpreter {
                     // mffs
                     self.state.fpr[frt] = self.state.fpscr as f64;
                     if record {
-                            self.copy_fpscr_to_cr1();
-                        }
+                        self.copy_fpscr_to_cr1();
+                    }
                     self.state.pc = next_pc;
                     return Ok(());
                 }
@@ -1196,7 +1196,11 @@ impl PpcInterpreter {
                             18 => a / b, // fdiv
                             25 => a * c, // fmul
                             23 => {
-                                if a >= 0.0 { c } else { b }
+                                if a >= 0.0 {
+                                    c
+                                } else {
+                                    b
+                                }
                             } // fsel
                             22 => b.sqrt(), // fsqrt
                             24 => (1.0_f32 / (b as f32)) as f64, // fres (single estimate domain)
