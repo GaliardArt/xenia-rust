@@ -136,15 +136,15 @@ impl PpcInterpreter {
     }
 
     /// Removes the pending guest exception notification for CPU-layer handling.
-    /// In imprecise modes, the caller must defer architectural delivery until
-    /// the appropriate guest synchronization point.
+    /// Ordinary floating-point events in imprecise modes are deferred until a
+    /// synchronization point; FE-enable transitions are delivered immediately.
     pub fn take_pending_exception(&mut self) -> Option<PpcException> {
         self.pending_exception.take()
     }
 
     /// Inspects the unconsumed guest exception event.
-    /// Precise events stop execution; imprecise events must be held until a
-    /// guest synchronization point by the eventual CPU dispatcher.
+    /// Ordinary imprecise events are held until synchronization; precise
+    /// events and FE-enable transition events stop execution immediately.
     pub fn pending_exception(&self) -> Option<PpcException> {
         self.pending_exception
     }
