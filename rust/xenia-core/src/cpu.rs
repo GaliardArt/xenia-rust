@@ -2936,7 +2936,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], f32::from_bits(1) as f64);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_4000); // positive single denormal
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_4000); // positive single denormal
     }
 
     #[test]
@@ -3068,7 +3068,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 2.5);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // positive normal
         assert_eq!(cpu.state.fpscr & 0xE600_0000, 0xA000_0000); // exception state unchanged
         assert_eq!(cpu.state.cr[1], 0x0A); // CR1 summary copied from FPSCR
 
@@ -3076,9 +3076,9 @@ mod tests {
         // FPRF class is the architectural signaling-NaN class (0x00).
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits(0x7FF0_0000_0000_0001);
-        cpu.state.fpscr = 0x0000_0800;
+        cpu.state.fpscr = 0x0000_4000;
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0);
         assert_eq!(cpu.state.fpscr & 0xE600_0000, 0);
     }
 
@@ -3100,7 +3100,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_2000); // negative zero
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
         assert_eq!(cpu.state.fpscr & 0xE000_0000, 0); // no FX/FEX/VX
 
         // The single-precision fsel. form also copies FPSCR[0:3] to CR1.
@@ -3240,7 +3240,7 @@ mod tests {
             | (1 << 24)
             | (1 << 15)
             | (1 << 14)
-            | 0x0000_0800
+            | 0x0000_4000
             | (1 << 7); // VE enables FEX while VXSNAN is pending.
 
         for _ in 0..7 {
@@ -3252,7 +3252,7 @@ mod tests {
         assert_eq!(cpu.state.cr[2], 0x0C); // FR/FI are copied, not cleared
         assert_eq!(cpu.state.fpscr & ((1 << 30) | (1 << 29)), 0); // summaries recomputed
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), (1 << 15) | (1 << 14));
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF preserved
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF preserved
     }
 
     #[test]
@@ -3356,7 +3356,7 @@ mod tests {
         );
         assert_eq!(cpu.state.cr[2], 0b0001);
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0001_1000); // quiet NaN
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_1000); // quiet NaN
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.cr[3], 0b0001);
         assert_ne!(cpu.state.fpscr & (1 << 29), 0);
@@ -3437,12 +3437,12 @@ mod tests {
         cpu.state.fpr[1] = 99.0;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800; // ZE, FR, FI, FPRF
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000; // ZE, FR, FI, FPRF
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 99.0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF unchanged
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF unchanged
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
@@ -3469,19 +3469,19 @@ mod tests {
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 20.0;
         cpu.state.fpr[4] = -0.0;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800; // ZE + status
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000; // ZE + status
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[1], 10.0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
 
         cpu.state.pc = 0x1004;
-        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_0800;
+        cpu.state.fpscr = (1 << 4) | (1 << 15) | (1 << 14) | 0x0000_4000;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[3], 20.0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
         assert_ne!(cpu.state.fpscr & (1 << 26), 0); // ZX
     }
@@ -3586,7 +3586,7 @@ mod tests {
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
     }
 
     #[test]
@@ -3609,7 +3609,7 @@ mod tests {
         assert_eq!(cpu.state.fpr[1].to_bits(), (-0.0_f64).to_bits());
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_2400); // negative zero
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0001_2000); // negative zero
     }
 
     #[test]
@@ -3634,7 +3634,7 @@ mod tests {
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // positive normal
     }
 
     #[test]
@@ -3658,7 +3658,7 @@ mod tests {
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0);
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // positive normal
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // positive normal
     }
 
     #[test]
@@ -3686,14 +3686,14 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert!(cpu.state.fpr[1].is_finite());
         assert_ne!(cpu.state.fpscr & (1 << 28), 0); // OX
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
 
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = 1 << 5; // UE
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.fpr[4], 2.0_f64.powi(462));
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // UX
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000);
     }
 
     #[test]
@@ -3812,12 +3812,12 @@ mod tests {
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpr[4] = f64::NAN;
         cpu.state.fpr[5] = 1.0;
-        cpu.state.fpscr = (1 << 7) | 0x0000_0800; // VE enabled; prior FPRF=positive
-        let prior_fprf = cpu.state.fpscr & 0x0000_3E00;
+        cpu.state.fpscr = (1 << 7) | 0x0000_4000; // VE enabled; prior FPRF=positive
+        let prior_fprf = cpu.state.fpscr & 0x0001_F000;
 
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, prior_fprf);
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, prior_fprf);
 
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = (1 << 7) | prior_fprf;
@@ -3841,12 +3841,12 @@ mod tests {
         cpu.state.fpr[1] = 42.0;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
-        cpu.state.fpscr = (1 << 7) | 0x0000_0800; // VE; prior positive-normal FPRF
+        cpu.state.fpscr = (1 << 7) | 0x0000_4000; // VE; prior positive-normal FPRF
 
         cpu.step(&mut memory).unwrap();
 
         assert_eq!(cpu.state.fpr[1], 42.0); // enabled invalid operation suppresses FPR write
-        assert_eq!(cpu.state.fpscr & 0x0000_3E00, 0x0000_0800); // FPRF unchanged
+        assert_eq!(cpu.state.fpscr & 0x0001_F000, 0x0000_4000); // FPRF unchanged
         assert_eq!(cpu.state.fpscr & ((1 << 15) | (1 << 14)), 0); // FR/FI cleared
         assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
@@ -4001,7 +4001,7 @@ mod tests {
         }
 
         assert_ne!(cpu.state.fpscr & (1 << 21), 0); // VXZDZ
-        assert_ne!(cpu.state.fpscr & (1 << 17), 0); // VXSQRT
+        assert_ne!(cpu.state.fpscr & (1 << 9), 0); // VXSQRT
         assert_ne!(cpu.state.fpscr & (1 << 20), 0); // VXIMZ
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX summary
     }
@@ -4115,7 +4115,7 @@ mod tests {
         assert_eq!(cpu.state.fpr[3].to_bits() as u32, i32::MIN as u32);
         assert_eq!(cpu.state.fpr[5].to_bits(), i64::MAX as u64);
         assert_eq!(cpu.state.fpr[7].to_bits(), i64::MIN as u64);
-        assert_ne!(cpu.state.fpscr & (1 << 16), 0); // VXCVI
+        assert_ne!(cpu.state.fpscr & (1 << 8), 0); // VXCVI
         assert_ne!(cpu.state.fpscr & (1 << 29), 0); // VX
     }
 
