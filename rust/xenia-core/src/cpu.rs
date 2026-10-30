@@ -451,7 +451,7 @@ impl PpcInterpreter {
                                 (product >> 64) as u64
                             }
                             11 => {
-                                let product = ((left as u32 as u128) * (right as u32 as u128));
+                                let product = (left as u32 as u128) * (right as u32 as u128);
                                 (product >> 32) as u64
                             }
                             73 => {
