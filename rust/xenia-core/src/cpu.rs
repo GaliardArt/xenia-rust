@@ -465,7 +465,7 @@ mod tests {
         // lbz r3,0(r4); lhz r5,2(r4); lha r6,4(r4); stb r3,6(r4); sth r5,8(r4)
         put_instruction(&mut memory, 0x1000, (34 << 26) | (3 << 21) | (4 << 16));
         put_instruction(&mut memory, 0x1004, (40 << 26) | (5 << 21) | (4 << 16) | 2);
-        put_instruction(&mut memory, 0x1008, (42 << 26) | (6 << 21) | (4 << 16) | 4);
+        put_instruction(&mut memory, 0x1008, (42 << 26) | (6 << 21) | (4 << 16) | 2);
         put_instruction(&mut memory, 0x100C, (38 << 26) | (3 << 21) | (4 << 16) | 6);
         put_instruction(&mut memory, 0x1010, (44 << 26) | (5 << 21) | (4 << 16) | 8);
         memory.write_u8(GuestAddress(0x1014), 0xAB).unwrap();
