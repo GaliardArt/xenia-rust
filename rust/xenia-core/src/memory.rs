@@ -91,6 +91,17 @@ impl GuestMemory {
         Ok(())
     }
 
+    /// Reads a 16-bit value in the Xbox 360's big-endian byte order.
+    pub fn read_u16_be(&self, address: GuestAddress) -> Result<u16, MemoryError> {
+        let bytes = self.read_bytes(address, 2)?;
+        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    /// Writes a 16-bit value in the Xbox 360's big-endian byte order atomically.
+    pub fn write_u16_be(&mut self, address: GuestAddress, value: u16) -> Result<(), MemoryError> {
+        self.write_bytes(address, &value.to_be_bytes())
+    }
+
     /// Reads a 32-bit value in the Xbox 360's big-endian byte order.
     pub fn read_u32_be(&self, address: GuestAddress) -> Result<u32, MemoryError> {
         let offset = self.offset_of(address)?;
@@ -165,6 +176,14 @@ impl GuestMemoryAccess for GuestMemory {
 
     fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error> {
         GuestMemory::write_u8(self, address, value)
+    }
+
+    fn read_u16_be(&self, address: GuestAddress) -> Result<u16, Self::Error> {
+        GuestMemory::read_u16_be(self, address)
+    }
+
+    fn write_u16_be(&mut self, address: GuestAddress, value: u16) -> Result<(), Self::Error> {
+        GuestMemory::write_u16_be(self, address, value)
     }
 
     fn read_u32_be(&self, address: GuestAddress) -> Result<u32, Self::Error> {
