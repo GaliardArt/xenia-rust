@@ -2175,6 +2175,8 @@ mod tests {
 
         assert_eq!(cpu.state.fpr[1], 3.0);
         assert_eq!(cpu.state.fpr[3], 2.0);
+        assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX: conversion was inexact
+        assert_ne!(cpu.state.fpscr & (1 << 31), 0); // FX: sticky exception summary
     }
 
     #[test]
