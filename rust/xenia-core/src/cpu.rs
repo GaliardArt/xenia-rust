@@ -456,6 +456,61 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
+                    535 | 567 | 599 | 631 => {
+                        let update = matches!(extended_opcode, 567 | 631);
+                        if update && (ra == 0 || ra == rt_rs) {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let value = if extended_opcode == 535 || extended_opcode == 567 {
+                            f32::from_bits(
+                                memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?,
+                            ) as f64
+                        } else {
+                            let high = memory
+                                .read_u32_be(GuestAddress(address))
+                                .map_err(Into::into)?;
+                            let low = memory
+                                .read_u32_be(GuestAddress(address.wrapping_add(4)))
+                                .map_err(Into::into)?;
+                            f64::from_bits(((high as u64) << 32) | low as u64)
+                        };
+                        self.state.fpr[rt_rs] = value;
+                        if update {
+                            self.state.gpr[ra] = address as u64;
+                        }
+                    }
+                    663 | 695 | 727 | 759 => {
+                        let update = matches!(extended_opcode, 695 | 759);
+                        if update && ra == 0 {
+                            return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                        }
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        if extended_opcode == 663 || extended_opcode == 695 {
+                            memory
+                                .write_u32_be(
+                                    GuestAddress(address),
+                                    (self.state.fpr[rt_rs] as f32).to_bits(),
+                                )
+                                .map_err(Into::into)?;
+                        } else {
+                            let bits = self.state.fpr[rt_rs].to_bits();
+                            memory
+                                .write_u32_be(GuestAddress(address), (bits >> 32) as u32)
+                                .map_err(Into::into)?;
+                            memory
+                                .write_u32_be(
+                                    GuestAddress(address.wrapping_add(4)),
+                                    bits as u32,
+                                )
+                                .map_err(Into::into)?;
+                        }
+                        if update {
+                            self.state.gpr[ra] = address as u64;
+                        }
+                    }
                     103 => {
                         let base = if ra == 0 {
                             0
