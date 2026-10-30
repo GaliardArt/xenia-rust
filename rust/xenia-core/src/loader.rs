@@ -434,8 +434,10 @@ mod tests {
         put_u32_be(&mut bytes, security_offset, security_size as u32);
         put_u32_be(&mut bytes, security_offset + 4, 0x1000);
         put_u32_be(&mut bytes, security_offset + 0x108, security_size as u32);
+        put_u32_be(&mut bytes, security_offset + 0x10C, 0x1000_0000);
         put_u32_be(&mut bytes, security_offset + 0x110, 0x8200_0000);
-        put_u32_be(&mut bytes, security_offset + 0x180, 0);
+        put_u32_be(&mut bytes, security_offset + 0x180, 1);
+        put_u32_be(&mut bytes, security_offset + 0x184, (1 << 28) | 1);
 
         put_u32_be(&mut bytes, format_offset, format_size as u32);
         put_u16_be(&mut bytes, format_offset + 4, 0);
@@ -540,8 +542,8 @@ mod tests {
         let mut memory = GuestAddressSpace::new();
         memory
             .map(
-                GuestAddress(0x8200_1000),
-                0x100,
+                GuestAddress(0x8200_0000),
+                0x1000,
                 MemoryPermissions::READ_WRITE,
             )
             .unwrap();
@@ -555,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_section_data_outside_decompressed_image() {
+    fn rejects_page_table_larger_than_decompressed_image() {
         let mut loaded = load_xex2_image(&valid_xex()).unwrap();
         loaded.security.page_descriptors[0].page_count = 2;
         let mut memory = GuestAddressSpace::new();
