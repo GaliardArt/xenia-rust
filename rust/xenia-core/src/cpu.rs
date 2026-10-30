@@ -456,6 +456,29 @@ impl PpcInterpreter {
                             self.set_cr_field(0, (value as i64).cmp(&0));
                         }
                     }
+                    103 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
+                        let mut vector = [0_u8; 16];
+                        for (index, byte) in vector.iter_mut().enumerate() {
+                            *byte = memory
+                                .read_u8(GuestAddress(address.wrapping_add(index as u32)))
+                                .map_err(Into::into)?;
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    231 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
+                        for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
+                            memory
+                                .write_u8(
+                                    GuestAddress(address.wrapping_add(index as u32)),
+                                    byte,
+                                )
+                                .map_err(Into::into)?;
+                        }
+                    }
                     87 | 119 | 279 | 311 | 343 | 375 | 23 | 55 => {
                         let update = matches!(xo, 119 | 311 | 375 | 55);
                         if update && (ra == 0 || ra == rt_rs) {
