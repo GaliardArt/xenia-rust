@@ -4579,6 +4579,13 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1000,
+                causes: 1 << 27, // UX
+            })
+        );
         assert_eq!(cpu.state.fpr[1].to_bits(), (f32::from_bits(1) as f64).to_bits());
         assert_ne!(cpu.state.fpscr & (1 << 27), 0); // enabled underflow: UX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
