@@ -90,11 +90,11 @@ pub fn parse_xbox_pe32(bytes: &[u8]) -> Result<XboxPeImage, PeError> {
     let file_header = get_range(bytes, file_header_offset, NT_FILE_HEADER_SIZE)
         .map_err(|_| PeError::TruncatedNtHeaders)?;
     let machine = read_u16_le(file_header, 0).map_err(|_| PeError::TruncatedNtHeaders)?;
-    let section_count = read_u16_le(file_header, 2).map_err(|_| PeError::TruncatedNtHeaders)? as usize;
+    let section_count =
+        read_u16_le(file_header, 2).map_err(|_| PeError::TruncatedNtHeaders)? as usize;
     let optional_header_size =
         read_u16_le(file_header, 16).map_err(|_| PeError::TruncatedNtHeaders)? as usize;
-    let characteristics =
-        read_u16_le(file_header, 18).map_err(|_| PeError::TruncatedNtHeaders)?;
+    let characteristics = read_u16_le(file_header, 18).map_err(|_| PeError::TruncatedNtHeaders)?;
 
     if machine != IMAGE_FILE_MACHINE_POWERPCBE {
         return Err(PeError::UnsupportedMachine);
@@ -139,7 +139,8 @@ pub fn parse_xbox_pe32(bytes: &[u8]) -> Result<XboxPeImage, PeError> {
         sections.push(PeSection {
             name,
             virtual_size: read_u32_le(header, 8).map_err(|_| PeError::SectionTableOutOfBounds)?,
-            virtual_address: read_u32_le(header, 12).map_err(|_| PeError::SectionTableOutOfBounds)?,
+            virtual_address: read_u32_le(header, 12)
+                .map_err(|_| PeError::SectionTableOutOfBounds)?,
             raw_size: read_u32_le(header, 16).map_err(|_| PeError::SectionTableOutOfBounds)?,
             raw_pointer: read_u32_le(header, 20).map_err(|_| PeError::SectionTableOutOfBounds)?,
             characteristics: read_u32_le(header, 36)
@@ -156,7 +157,9 @@ pub fn parse_xbox_pe32(bytes: &[u8]) -> Result<XboxPeImage, PeError> {
 }
 
 fn get_range(bytes: &[u8], offset: usize, size: usize) -> Result<&[u8], PeError> {
-    let end = offset.checked_add(size).ok_or(PeError::TruncatedNtHeaders)?;
+    let end = offset
+        .checked_add(size)
+        .ok_or(PeError::TruncatedNtHeaders)?;
     bytes.get(offset..end).ok_or(PeError::TruncatedNtHeaders)
 }
 
