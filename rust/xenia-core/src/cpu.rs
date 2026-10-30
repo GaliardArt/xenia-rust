@@ -1356,6 +1356,7 @@ impl PpcInterpreter {
                         }
                         self.state.pc = next_pc;
                     }
+                    146 => {
                         // Xenon mtmsr writes the full 64-bit MSR. The L=1
                         // form is reserved for this instruction encoding.
                         if instruction & 0x001F_0000 != 0 {
@@ -5659,7 +5660,11 @@ mod tests {
     fn mfspr_and_mtspr_access_srr0_and_srr1_for_exception_handlers() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_spr = |rt: u32, spr: u32, xo: u32| {
-            (31 << 26) | (rt << 21) | ((spr & 0x1F) << 16) | (((spr >> 5) & 0x1F) << 11) | (xo << 1)
+            (31 << 26)
+                | (rt << 21)
+                | ((spr & 0x1F) << 16)
+                | (((spr >> 5) & 0x1F) << 11)
+                | (xo << 1)
         };
         put_instruction(&mut memory, 0x1000, encode_spr(3, 26, 339)); // mfspr r3,SRR0
         put_instruction(&mut memory, 0x1004, encode_spr(4, 27, 339)); // mfspr r4,SRR1
