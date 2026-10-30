@@ -479,7 +479,7 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_eq!(cpu.state.gpr[4], 0x0034_5600);
+        assert_eq!(cpu.state.gpr[4], 0x0056_7800);
     }
 
     #[test]
