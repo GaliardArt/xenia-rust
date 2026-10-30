@@ -3,7 +3,9 @@ use std::error::Error;
 use std::fs;
 use std::io::{self, ErrorKind};
 
-use xenia_core::{XEX_HEADER_ENTRY_POINT, parse_xbox_pe32, parse_xex2_header};
+use xenia_core::{
+    XEX_HEADER_ENTRY_POINT, parse_xbox_pe32, parse_xex2_header, parse_xex2_security_info,
+};
 
 fn main() {
     if let Err(error) = run() {
@@ -36,6 +38,15 @@ fn run() -> Result<(), Box<dyn Error>> {
                 header.security_info_offset
             );
             println!("  optional headers:    {}", header.optional_headers.len());
+            match parse_xex2_security_info(&bytes, &header) {
+                Ok(security) => {
+                    println!("  image size:          0x{:08X}", security.image_size);
+                    println!("  load address:        0x{:08X}", security.load_address);
+                    println!("  image flags:         0x{:08X}", security.image_flags);
+                    println!("  page descriptors:    {}", security.page_descriptors.len());
+                }
+                Err(error) => println!("  security info:       unavailable ({error})"),
+            }
             if let Some(entry_point) = header.optional_header_value(XEX_HEADER_ENTRY_POINT) {
                 println!("  entry point:         0x{entry_point:08X}");
             }
