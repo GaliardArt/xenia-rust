@@ -1134,6 +1134,23 @@ impl PpcInterpreter {
                 let bo = ((instruction >> 21) & 0x1F) as u8;
                 let bi = ((instruction >> 16) & 0x1F) as usize;
                 let extended_opcode = (instruction >> 1) & 0x3FF;
+                if extended_opcode == 150 {
+                    // isync is context-synchronizing. All prior guest
+                    // instructions have completed before an imprecise FP
+                    // event is made visible to the outer CPU loop.
+                    self.state.pc = next_pc;
+                    if let Some(
+                        exception @ PpcException::FloatingPoint {
+                            mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                                | PpcFpExceptionMode::ImpreciseRecoverable,
+                            ..
+                        },
+                    ) = self.pending_exception
+                    {
+                        return Err(PpcError::PendingException(exception));
+                    }
+                    return Ok(());
+                }
                 if matches!(
                     extended_opcode,
                     257 | 129 | 289 | 225 | 33 | 449 | 417 | 193
@@ -1184,6 +1201,22 @@ impl PpcInterpreter {
                 let left = self.state.gpr[ra];
                 let right = self.state.gpr[rb];
                 match extended_opcode {
+                    598 => {
+                        // sync is execution-synchronizing. Surface delayed
+                        // imprecise FP exceptions only after advancing past it.
+                        self.state.pc = next_pc;
+                        if let Some(
+                            exception @ PpcException::FloatingPoint {
+                                mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                                    | PpcFpExceptionMode::ImpreciseRecoverable,
+                                ..
+                            },
+                        ) = self.pending_exception
+                        {
+                            return Err(PpcError::PendingException(exception));
+                        }
+                        return Ok(());
+                    }
                     855 | 887 | 983 => {
                         // Integer-word transfers use the low-order 32 bits of
                         // the FPR. lfiwax sign-fills the upper word; lfiwzx
@@ -4918,6 +4951,60 @@ mod tests {
                 mode: PpcFpExceptionMode::ImpreciseRecoverable,
             })
         );
+    }
+
+    #[test]
+    fn imprecise_fp_exception_is_reported_at_sync_after_prior_work_completes() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        // fdiv f1,f2,f3; addi r4,r4,1; sync
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
+        put_instruction(&mut memory, 0x1008, (31 << 26) | (598 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE1; // imprecise nonrecoverable
+
+        cpu.step(&mut memory).unwrap();
+        let pending = cpu.pending_exception().expect("imprecise FP event");
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.gpr[4], 1);
+        assert_eq!(cpu.state.pc, 0x1008);
+
+        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(cpu.state.pc, 0x100C);
+        assert_eq!(cpu.pending_exception(), Some(pending));
+    }
+
+    #[test]
+    fn imprecise_fp_exception_is_reported_at_isync() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        // fdiv f1,f2,f3; isync
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
+        );
+        put_instruction(&mut memory, 0x1004, (19 << 26) | (150 << 1));
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 0.0;
+        cpu.state.fpr[3] = 0.0;
+        cpu.state.fpscr = 1 << 7; // VE
+        cpu.state.msr = PPC_MSR_FE0; // imprecise recoverable
+
+        cpu.step(&mut memory).unwrap();
+        let pending = cpu.pending_exception().expect("imprecise FP event");
+
+        assert_eq!(cpu.step(&mut memory), Err(PpcError::PendingException(pending)));
+        assert_eq!(cpu.state.pc, 0x1008);
+        assert_eq!(cpu.pending_exception(), Some(pending));
     }
 
     #[test]
