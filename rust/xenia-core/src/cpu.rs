@@ -590,6 +590,78 @@ impl PpcInterpreter {
                 }
                 self.state.pc = next_pc;
             }
+            // Floating-point execution: A-form arithmetic and common X-form operations.
+            59 | 63 => {
+                let frt = rt_rs;
+                let fra = ra;
+                let frb = ((instruction >> 11) & 0x1F) as usize;
+                let frc = ((instruction >> 6) & 0x1F) as usize;
+                let xo10 = (instruction >> 1) & 0x3FF;
+                let xo5 = xo10 & 0x1F;
+                let single = opcode == 59;
+                let record = instruction & 1 != 0;
+                let a = self.state.fpr[fra];
+                let b = self.state.fpr[frb];
+                let c = self.state.fpr[frc];
+
+                let (value, updates_fpr) = match xo10 {
+                    264 => (b.abs(), true),       // fabs
+                    72 => (b, true),              // fmr
+                    136 => (-b.abs(), true),      // fnabs
+                    40 => (-b, true),             // fneg
+                    12 => ((b as f32) as f64, true), // frsp
+                    14 => ((b as i32 as f64), true), // fctiw (rounding-to-zero approximation)
+                    15 => ((b.trunc() as i32 as f64), true), // fctiwz
+                    583 => (self.state.fpscr as f64, true), // mffs
+                    0 | 32 => {
+                        let field = ((instruction >> 23) & 0x7) as usize;
+                        let condition = if a.is_nan() || b.is_nan() {
+                            0b0001
+                        } else {
+                            match a.partial_cmp(&b).unwrap() {
+                                Ordering::Less => 0b1000,
+                                Ordering::Greater => 0b0100,
+                                Ordering::Equal => 0b0010,
+                            }
+                        };
+                        self.state.cr[field] = condition;
+                        (0.0, false)
+                    }
+                    _ => match xo5 {
+                        21 => (a + b, true),                  // fadd
+                        20 => (a - b, true),                  // fsub
+                        18 => (a / b, true),                  // fdiv
+                        25 => (a * c, true),                  // fmul
+                        23 => (if a >= 0.0 { c } else { b }, true), // fsel
+                        22 => (b.sqrt(), true),                // fsqrt
+                        24 => (1.0 / b, true),                 // fres
+                        26 => (1.0 / b.sqrt(), true),          // frsqrte
+                        29 => (a.mul_add(c, b), true),         // fmadd
+                        28 => (a.mul_add(c, -b), true),        // fmsub
+                        31 => (-a.mul_add(c, b), true),        // fnmadd
+                        30 => (-a.mul_add(c, -b), true),       // fnmsub
+                        _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                    },
+                };
+
+                if updates_fpr {
+                    let stored = if single { (value as f32) as f64 } else { value };
+                    self.state.fpr[frt] = stored;
+                    if record {
+                        let ordering = if stored.is_nan() {
+                            Ordering::Equal
+                        } else if stored < 0.0 {
+                            Ordering::Less
+                        } else if stored > 0.0 {
+                            Ordering::Greater
+                        } else {
+                            Ordering::Equal
+                        };
+                        self.set_cr_field(1, ordering);
+                    }
+                }
+                self.state.pc = next_pc;
+            }
             // lbz RT,D(RA) — load a zero-extended byte.
             34 => {
                 let base = if ra == 0 {
