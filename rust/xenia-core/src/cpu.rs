@@ -828,6 +828,58 @@ mod tests {
     }
 
     #[test]
+    fn indexed_loads_and_stores_support_update_forms() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 64);
+        let encode_x = |rt: u32, ra: u32, rb: u32, xo: u32| {
+            (31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode_x(5, 3, 4, 87)); // lbzx
+        put_instruction(&mut memory, 0x1004, encode_x(6, 3, 7, 311)); // lhzux
+        put_instruction(&mut memory, 0x1008, encode_x(8, 3, 4, 151)); // stwx
+        put_instruction(&mut memory, 0x100C, encode_x(9, 3, 7, 183)); // stwux
+        memory.write_u8(GuestAddress(0x1014), 0xAB).unwrap();
+        memory.write_u16_be(GuestAddress(0x1018), 0x1234).unwrap();
+
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.gpr[3] = 0x1010;
+        cpu.state.gpr[4] = 4;
+        cpu.state.gpr[7] = 8;
+        cpu.state.gpr[8] = 0xCAFE_BABE;
+        cpu.state.gpr[9] = 0xDEAD_BEEF;
+
+        for _ in 0..4 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.gpr[5], 0xAB);
+        assert_eq!(cpu.state.gpr[6], 0x1234);
+        assert_eq!(memory.read_u32_be(GuestAddress(0x101C)), Ok(0xCAFE_BABE));
+        assert_eq!(memory.read_u32_be(GuestAddress(0x1020)), Ok(0xDEAD_BEEF));
+        assert_eq!(cpu.state.gpr[3], 0x1020);
+    }
+
+    #[test]
+    fn indexed_update_load_rejects_invalid_base_destination_alias() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // lhzux r3,r3,r4 (RA=RT is invalid for update loads).
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (31 << 26) | (3 << 21) | (3 << 16) | (4 << 11) | (311 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::UnsupportedInstruction {
+                pc: 0x1000,
+                opcode: 31
+            })
+        );
+    }
+
+    #[test]
     fn addic_sets_carry_and_andi_updates_cr0() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // addic r4,r3,1
