@@ -472,7 +472,11 @@ impl PpcInterpreter {
                         self.state.vr[rt_rs] = vector;
                     }
                     231 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
                             memory
