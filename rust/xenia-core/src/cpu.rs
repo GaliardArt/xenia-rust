@@ -149,6 +149,22 @@ impl PpcInterpreter {
         self.pending_exception
     }
 
+    /// Returns an ordinary imprecise FP event that must be delivered before
+    /// an FPSCR instruction begins. FPSCR instructions serialize prior
+    /// floating-point work, including its enabled-exception handler.
+    fn pending_imprecise_fp_exception(&self) -> Option<PpcException> {
+        match self.pending_exception {
+            Some(
+                exception @ PpcException::FloatingPoint {
+                    mode: PpcFpExceptionMode::ImpreciseNonRecoverable
+                        | PpcFpExceptionMode::ImpreciseRecoverable,
+                    ..
+                },
+            ) => Some(exception),
+            _ => None,
+        }
+    }
+
     fn branch_condition(&mut self, bo: u8, bi: usize) -> bool {
         let ignore_cr = bo & 0x10 != 0;
         let expected_cr = bo & 0x08 != 0;
@@ -1961,6 +1977,15 @@ impl PpcInterpreter {
                 let xo10 = (instruction >> 1) & 0x3FF;
                 let xo5 = xo10 & 0x1F;
                 let single = opcode == 59;
+
+                // All FPSCR access instructions serialize prior floating-point
+                // operations. Deliver a delayed exception before the current
+                // instruction can read, clear, or replace the FPSCR state.
+                if opcode == 63 && matches!(xo10, 64 | 38 | 70 | 134 | 711 | 583) {
+                    if let Some(exception) = self.pending_imprecise_fp_exception() {
+                        return Err(PpcError::PendingException(exception));
+                    }
+                }
                 if (single && !matches!(xo5, 18 | 20 | 21 | 22 | 24 | 25 | 28..=31))
                     || (!single && xo10 == 24)
                 {
@@ -5370,6 +5395,47 @@ mod tests {
             })
         );
         assert_ne!(cpu.state.fpscr & (1 << 19), 0); // VXVC
+    }
+
+    #[test]
+    fn fpscr_instructions_deliver_prior_imprecise_fp_exceptions_before_execution() {
+        let fpscr_instructions = [
+            (63 << 26) | (1 << 23) | (64 << 1), // mcrfs cr1, fpscr0
+            (63 << 26) | (1 << 21) | (583 << 1), // mffs f1
+            (63 << 26) | (7 << 21) | (38 << 1), // mtfsb1
+            (63 << 26) | (7 << 21) | (70 << 1), // mtfsb0
+            (63 << 26) | (7 << 23) | (1 << 12) | (134 << 1), // mtfsfi
+            (63 << 26) | (0xFF << 17) | (1 << 11) | (711 << 1), // mtfsf
+        ];
+        let pending = PpcException::FloatingPoint {
+            instruction_pc: 0x0FFC,
+            causes: (1 << 29) | (1 << 21),
+            mode: PpcFpExceptionMode::ImpreciseRecoverable,
+        };
+
+        for instruction in fpscr_instructions {
+            let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+            put_instruction(&mut memory, 0x1000, instruction);
+            let mut cpu = PpcInterpreter::default();
+            cpu.state.pc = 0x1000;
+            cpu.state.fpscr = 0xA123_4567;
+            cpu.state.fpr[1] = f64::from_bits(0xFFF8_0000_7654_3210);
+            cpu.pending_exception = Some(pending);
+
+            let original_fpscr = cpu.state.fpscr;
+            let original_fpr = cpu.state.fpr;
+            let original_cr = cpu.state.cr;
+
+            assert_eq!(
+                cpu.step(&mut memory),
+                Err(PpcError::PendingException(pending))
+            );
+            assert_eq!(cpu.state.pc, 0x1000);
+            assert_eq!(cpu.state.fpscr, original_fpscr);
+            assert_eq!(cpu.state.fpr, original_fpr);
+            assert_eq!(cpu.state.cr, original_cr);
+            assert_eq!(cpu.pending_exception(), Some(pending));
+        }
     }
 
 }
