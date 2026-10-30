@@ -2779,8 +2779,8 @@ impl PpcInterpreter {
 #[cfg(test)]
 mod tests {
     use super::{
-        PpcError, PpcException, PpcFpExceptionMode, PpcInterpreter, PPC_MSR_FE0, PPC_MSR_FE1,
-        PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE,
+        PPC_MSR_FE0, PPC_MSR_FE1, PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION,
+        PPC_SRR1_IMPRECISE, PpcError, PpcException, PpcFpExceptionMode, PpcInterpreter,
     };
     use crate::address_space::{GuestAddressSpace, MemoryPermissions};
     use crate::memory::{GuestAddress, GuestMemory, MemoryError};
