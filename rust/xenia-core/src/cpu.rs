@@ -47,6 +47,7 @@ pub enum PpcError {
     AddressSpace(AddressSpaceError),
     UnsupportedInstruction { pc: u32, opcode: u32 },
     UnsupportedBranchOption { pc: u32, bo: u8 },
+    GuestException(PpcException),
 }
 
 impl From<MemoryError> for PpcError {
@@ -1884,6 +1885,9 @@ impl PpcInterpreter {
                         false,
                     );
                     self.state.pc = next_pc;
+                    if let Some(exception) = self.take_pending_exception() {
+                        return Err(PpcError::GuestException(exception));
+                    }
                     return Ok(());
                 }
 
@@ -2258,6 +2262,9 @@ impl PpcInterpreter {
                     }
                 }
                 self.state.pc = next_pc;
+                if let Some(exception) = self.take_pending_exception() {
+                    return Err(PpcError::GuestException(exception));
+                }
             }
             // lbz RT,D(RA) — load a zero-extended byte.
             34 => {
