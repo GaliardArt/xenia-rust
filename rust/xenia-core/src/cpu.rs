@@ -169,8 +169,8 @@ impl PpcInterpreter {
             // rlwinm RA,RS,SH,MB,ME — rotate left word and mask.
             21 => {
                 let shift = (instruction >> 11) & 0x1F;
-                let mask_begin = ((instruction >> 6) & 0x1F) as u32;
-                let mask_end = ((instruction >> 1) & 0x1F) as u32;
+                let mask_begin = (instruction >> 6) & 0x1F;
+                let mask_end = (instruction >> 1) & 0x1F;
                 let mut mask = 0_u32;
                 let mut bit = mask_begin;
                 loop {
