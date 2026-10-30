@@ -122,11 +122,11 @@ pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadErr
     let format_end = file_format_offset
         .checked_add(FILE_FORMAT_FIXED_SIZE)
         .ok_or(XexLoadError::FileFormatHeaderOutOfBounds)?;
-    let file_format = bytes
+    let file_format_fixed = bytes
         .get(file_format_offset..format_end)
         .ok_or(XexLoadError::FileFormatHeaderOutOfBounds)?;
 
-    let info_size = read_u32_be(file_format, 0) as usize;
+    let info_size = read_u32_be(file_format_fixed, 0) as usize;
     if info_size < FILE_FORMAT_FIXED_SIZE {
         return Err(XexLoadError::InvalidFileFormatHeaderSize);
     }
@@ -139,6 +139,9 @@ pub fn load_xex2_uncompressed(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadErr
     if info_end > header.header_size as usize {
         return Err(XexLoadError::InvalidFileFormatHeaderSize);
     }
+    let file_format = bytes
+        .get(file_format_offset..info_end)
+        .ok_or(XexLoadError::FileFormatHeaderOutOfBounds)?;
 
     let encryption_type = read_u16_be(file_format, 4);
     let compression_type = read_u16_be(file_format, 6);
