@@ -39,6 +39,7 @@ pub enum XexLoadError {
     Layout(LayoutError),
     AddressSpace(AddressSpaceError),
     ImageSizeDoesNotMatchPageTable,
+    SectionOutsideImage,
     MappedImageTooLarge,
     MissingFileFormatHeader,
     FileFormatHeaderOutOfBounds,
@@ -60,6 +61,7 @@ impl fmt::Display for XexLoadError {
             Self::Pe(error) => write!(f, "embedded PE image: {error}"),
             Self::Layout(error) => write!(f, "PE image layout: {error}"),
             Self::AddressSpace(error) => write!(f, "guest memory mapping: {error}"),
+            Self::SectionOutsideImage => f.write_str("PE section extends beyond the loaded XEX image"),
             Self::ImageSizeDoesNotMatchPageTable => {
                 f.write_str("XEX image size does not match its page-descriptor table")
             }
@@ -260,6 +262,9 @@ pub fn load_xex2_image(bytes: &[u8]) -> Result<XexLoadedImage, XexLoadError> {
         .optional_header_value(XEX_HEADER_IMAGE_BASE_ADDRESS)
         .unwrap_or(security.load_address);
     let layout = plan_image_layout(&pe, load_base)?;
+    if layout.image_end_exclusive - load_base as u64 > image.len() as u64 {
+        return Err(XexLoadError::SectionOutsideImage);
+    }
 
     Ok(XexLoadedImage {
         header,
@@ -420,7 +425,7 @@ mod tests {
         let format_size = 8;
         let header_size = format_offset + format_size;
         let image_offset = header_size;
-        let mut bytes = vec![0; image_offset + 0x1000];
+        let mut bytes = vec![0; image_offset + 0x2000];
 
         bytes[0..4].copy_from_slice(b"XEX2");
         put_u32_be(&mut bytes, 4, 0);
@@ -432,12 +437,12 @@ mod tests {
         put_u32_be(&mut bytes, 28, format_offset as u32);
 
         put_u32_be(&mut bytes, security_offset, security_size as u32);
-        put_u32_be(&mut bytes, security_offset + 4, 0x1000);
+        put_u32_be(&mut bytes, security_offset + 4, 0x2000);
         put_u32_be(&mut bytes, security_offset + 0x108, security_size as u32);
         put_u32_be(&mut bytes, security_offset + 0x10C, 0x1000_0000);
         put_u32_be(&mut bytes, security_offset + 0x110, 0x8200_0000);
         put_u32_be(&mut bytes, security_offset + 0x180, 1);
-        put_u32_be(&mut bytes, security_offset + 0x184, (1 << 28) | 1);
+        put_u32_be(&mut bytes, security_offset + 0x184, (1 << 28) | 2);
 
         put_u32_be(&mut bytes, format_offset, format_size as u32);
         put_u16_be(&mut bytes, format_offset + 4, 0);
@@ -462,7 +467,7 @@ mod tests {
         let format_offset = security_offset + security_size;
         let format_size = 16;
         let header_size = format_offset + format_size;
-        let mut bytes = vec![0; header_size + payload.len()];
+        let mut bytes = vec![0; header_size + 0x2000];
 
         bytes[0..4].copy_from_slice(b"XEX2");
         put_u32_be(&mut bytes, 8, header_size as u32);
@@ -472,12 +477,12 @@ mod tests {
         put_u32_be(&mut bytes, 28, format_offset as u32);
 
         put_u32_be(&mut bytes, security_offset, security_size as u32);
-        put_u32_be(&mut bytes, security_offset + 4, 0x1000);
+        put_u32_be(&mut bytes, security_offset + 4, 0x2000);
         put_u32_be(&mut bytes, security_offset + 0x108, security_size as u32);
         put_u32_be(&mut bytes, security_offset + 0x10C, 0x1000_0000);
         put_u32_be(&mut bytes, security_offset + 0x110, 0x8200_0000);
         put_u32_be(&mut bytes, security_offset + 0x180, 1);
-        put_u32_be(&mut bytes, security_offset + 0x184, (1 << 28) | 1);
+        put_u32_be(&mut bytes, security_offset + 0x184, (1 << 28) | 2);
 
         put_u32_be(&mut bytes, format_offset, format_size as u32);
         put_u16_be(&mut bytes, format_offset + 4, 0);
@@ -486,7 +491,7 @@ mod tests {
         put_u32_be(
             &mut bytes,
             format_offset + 12,
-            0x1000 - payload.len() as u32,
+            0x2000 - payload.len() as u32,
         );
         bytes[header_size..].copy_from_slice(&payload);
         bytes
@@ -495,7 +500,7 @@ mod tests {
     #[test]
     fn loads_unencrypted_basic_compressed_xex2() {
         let loaded = load_xex2_image(&basic_fixture()).unwrap();
-        assert_eq!(loaded.image.len(), 0x1000);
+        assert_eq!(loaded.image.len(), 0x2000);
         assert_eq!(&loaded.image[..2], b"MZ");
         assert!(
             loaded.image[valid_pe().len()..]
@@ -559,7 +564,7 @@ mod tests {
     #[test]
     fn rejects_page_table_larger_than_decompressed_image() {
         let mut loaded = load_xex2_image(&valid_xex()).unwrap();
-        loaded.security.page_descriptors[0].page_count = 2;
+        loaded.security.page_descriptors[0].page_count = 3;
         let mut memory = GuestAddressSpace::new();
         assert_eq!(
             loaded.map_into(&mut memory),
