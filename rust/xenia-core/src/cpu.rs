@@ -201,6 +201,13 @@ impl PpcInterpreter {
         }
     }
 
+    fn is_signaling_nan(value: f64) -> bool {
+        let bits = value.to_bits();
+        (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
+            && (bits & 0x000F_FFFF_FFFF_FFFF) != 0
+            && (bits & 0x0008_0000_0000_0000) == 0
+    }
+
     fn update_fpscr_for_result(
         &mut self,
         value: f64,
@@ -208,7 +215,9 @@ impl PpcInterpreter {
         inexact: bool,
         record: bool,
     ) {
-        let invalid = value.is_nan() && !operands.iter().any(|operand| operand.is_nan());
+        let has_nan_operand = operands.iter().any(|operand| operand.is_nan());
+        let invalid = value.is_nan()
+            && (!has_nan_operand || operands.iter().any(|operand| Self::is_signaling_nan(*operand)));
         let div_zero = operands.len() >= 2
             && operands[1] == 0.0
             && operands[0] != 0.0
@@ -1251,13 +1260,16 @@ impl PpcInterpreter {
                     let rounded = (value as f32) as f64;
                     self.state.fpr[frt] = rounded;
                     if update_status {
-                        let operands: &[f64] = match xo5 {
-                            18 => &[a, b],
-                            22 | 26 => &[b],
-                            24 => &[1.0, b],
-                            25 => &[a, c],
-                            29..=31 => &[a, b, c],
-                            _ => &[a, b],
+                        let operands: &[f64] = match xo10 {
+                            12 | 14 | 15 | 814 | 815 | 846 => &[b],
+                            _ => match xo5 {
+                                18 => &[a, b],
+                                22 | 26 => &[b],
+                                24 => &[1.0, b],
+                                25 => &[a, c],
+                                29..=31 => &[a, b, c],
+                                _ => &[a, b],
+                            },
                         };
                         self.update_fpscr_for_result(rounded, operands, rounded != value, record);
                     }
@@ -1272,7 +1284,7 @@ impl PpcInterpreter {
                             29..=31 => &[a, b, c],
                             _ => &[a, b],
                         };
-                        let inexact = xo10 == 12 && value != b;
+                        let inexact = matches!(xo10, 12 | 14 | 15 | 814 | 815) && value != b;
                         self.update_fpscr_for_result(value, operands, inexact, record);
                     } else if record {
                         self.copy_fpscr_to_cr1();
