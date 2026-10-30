@@ -931,7 +931,9 @@ mod tests {
         // lwzu r5,4(r3); stwu r6,8(r3)
         put_instruction(&mut memory, 0x1000, (33 << 26) | (5 << 21) | (3 << 16) | 4);
         put_instruction(&mut memory, 0x1004, (37 << 26) | (6 << 21) | (3 << 16) | 8);
-        memory.write_u32_be(GuestAddress(0x1014), 0x1234_5678).unwrap();
+        memory
+            .write_u32_be(GuestAddress(0x1014), 0x1234_5678)
+            .unwrap();
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1010;
