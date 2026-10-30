@@ -77,12 +77,16 @@ The current loader extension is being revalidated after its final allocation gua
 
 ### M3 — CPU interpreter
 - [x] Establish the initial Xenon/PowerPC state model and deterministic step/fetch loop.
-- [x] Implement initial integer immediate, logical, compare, branch, word load/store, byte load/store, and halfword load/store instruction groups.
+- [x] Implement a broad but incomplete subset of integer immediate/X-form, branch, indexed/update memory, scalar FP, and VMX operations.
 - [x] Keep unsupported opcodes explicit and add focused instruction tests.
+- [ ] Generate an opcode-by-opcode coverage manifest from the C++ reference metadata.
+- [ ] Resolve known semantic risks (including 64-bit divide decoding, atomic 64-bit memory access, FP/FPSCR fidelity, and VMX128 encoding).
 - [ ] Complete branch/CR/XER edge semantics and architectural exception behavior.
-- [ ] Expand integer instruction coverage (update/indexed forms, rotate/shift, multiply/divide, arithmetic overflow/carry).
-- [ ] Implement floating-point and VMX/Altivec behavior with reference vectors.
-- [ ] Differentially validate broader instruction coverage against the C++ reference.
+- [ ] Expand integer instruction coverage (64-bit arithmetic, remaining update/indexed forms, rotate/shift, multiply/divide, traps and control instructions).
+- [ ] Implement full scalar floating-point and Xenon VMX/VMX128 behavior with reference vectors.
+- [ ] Differentially validate instruction behavior against the C++ reference.
+
+See [CPU Interpreter Coverage Audit](CPU_INTERPRETER_COVERAGE.md) for the inspected opcode-family inventory, correctness risks, source map, and completion gates.
 
 ### M4 — Kernel and runtime
 - [ ] Model threads, scheduling, synchronization, virtual objects, and guest API dispatch.
@@ -106,10 +110,7 @@ with big-endian byte, halfword and word access; a non-overlapping, permissioned
 region-based address space with protect/unmap operations; a memory-access
 interface shared by CPU and memory models, including execute-permission checks
 for instruction fetch; and a deterministic but still partial PPC interpreter.
-Its current instruction groups include addi/addis, mulli, subfic/addic, signed and
-unsigned compares, rlwinm, immediate and register logical operations, add/subf,
-conditional and unconditional branches (including LR/CTR branch forms), and
-byte/halfword/word loads and stores (lbz, lhz, lha, stb, sth, lwz, stw).
+Its current instruction groups include integer immediate and X-form arithmetic/logical/shift operations, conditional and unconditional branches, CR bit logic, indexed and update-form memory operations, a partial scalar floating-point subset, and a small standard VMX subset. This broader subset remains incomplete and has known semantic risks; see [CPU Interpreter Coverage Audit](CPU_INTERPRETER_COVERAGE.md).
  Both parsers have malformed-input tests; the CLI can inspect XEX2 and
 PE metadata. Unsupported CPU opcodes fail explicitly.
 This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
