@@ -2095,13 +2095,7 @@ mod tests {
         put_instruction(
             &mut memory,
             0x1000,
-            (63 << 26)
-                | (1 << 21)
-                | (2 << 16)
-                | (3 << 11)
-                | (4 << 6)
-                | (23 << 1)
-                | 1,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
         );
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
