@@ -105,10 +105,9 @@ deterministic PPC subset (addi, addis, ori, oris, b, cmpwi/cmplwi, CR-only
 beq/bne forms, lwz and stw); and defensive XEX2 fixed-header/optional-header and Xbox PE32 header/section
 parsers. Both parsers have malformed-input tests; the CLI can inspect XEX2 and
 PE metadata. Unsupported CPU opcodes fail explicitly.
-This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
-page-level permissions, decryption/decompression, PE section mapping, kernel
-services, concurrency, most PPC instructions and exception semantics remain
-future work. The CLI cannot run Xbox 360 games. Current CI runs `cargo fmt`, workspace tests,
+This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases, page-level permissions, encrypted/compressed XEX decoding,
+actual PE section mapping, import resolution, kernel services, concurrency,
+most PPC instructions and exception semantics remain future work. The CLI cannot run Xbox 360 games. Current CI runs `cargo fmt`, workspace tests,
 Clippy with warnings denied, and a CLI help smoke test.
 
 ## Local validation commands
