@@ -649,19 +649,29 @@ impl PpcInterpreter {
                         }
                     }
                     0x404 => {
-                        for lane in 0..16 { result[lane] = a[lane] & b[lane]; }
+                        for lane in 0..16 {
+                            result[lane] = a[lane] & b[lane];
+                        }
                     }
                     0x444 => {
-                        for lane in 0..16 { result[lane] = a[lane] & !b[lane]; }
+                        for lane in 0..16 {
+                            result[lane] = a[lane] & !b[lane];
+                        }
                     }
                     0x484 => {
-                        for lane in 0..16 { result[lane] = a[lane] | b[lane]; }
+                        for lane in 0..16 {
+                            result[lane] = a[lane] | b[lane];
+                        }
                     }
                     0x4C4 => {
-                        for lane in 0..16 { result[lane] = a[lane] ^ b[lane]; }
+                        for lane in 0..16 {
+                            result[lane] = a[lane] ^ b[lane];
+                        }
                     }
                     0x504 => {
-                        for lane in 0..16 { result[lane] = !(a[lane] | b[lane]); }
+                        for lane in 0..16 {
+                            result[lane] = !(a[lane] | b[lane]);
+                        }
                     }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
