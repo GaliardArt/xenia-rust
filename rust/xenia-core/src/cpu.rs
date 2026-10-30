@@ -77,7 +77,7 @@ struct FpExceptionFlags {
     invalid_cause: u32,
 }
 
-/// A guest-visible floating-point exception raised by the last instruction.
+/// A guest-visible floating-point exception awaiting CPU-layer dispatch.
 /// The CPU/exception-dispatch layer consumes this event and performs the
 /// platform-specific program-exception entry sequence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -97,7 +97,7 @@ impl PpcInterpreter {
         self.pending_exception.take()
     }
 
-    /// Inspects the guest exception produced by the most recent instruction.
+    /// Inspects the unconsumed guest exception event.
     /// The CPU loop should consume it after each successful step.
     pub fn pending_exception(&self) -> Option<PpcException> {
         self.pending_exception
@@ -4714,6 +4714,33 @@ mod tests {
         );
         assert_ne!(cpu.state.fpscr & (1 << 25), 0); // XX
         assert_ne!(cpu.state.fpscr & (1 << 30), 0); // FEX
+    }
+
+    #[test]
+    fn enabled_ordered_nan_compare_reports_vxvc_cause_to_cpu_layer() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fcmpo cr1,f2,f3
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 23) | (2 << 16) | (3 << 11) | (32 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = f64::NAN;
+        cpu.state.fpr[3] = 1.0;
+        cpu.state.fpscr = 1 << 7; // VE
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.take_pending_exception(),
+            Some(PpcException::FloatingPoint {
+                pc: 0x1000,
+                causes: (1 << 29) | (1 << 19), // VX | VXVC
+            })
+        );
+        assert_ne!(cpu.state.fpscr & (1 << 19), 0); // VXVC
     }
 
 }
