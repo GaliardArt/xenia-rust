@@ -2205,7 +2205,11 @@ impl PpcInterpreter {
                                 xo10 == 12,
                                 record,
                             );
-                            if invalid_enabled {
+                            let reciprocal_zero_divide_enabled =
+                                matches!(xo5, 24 | 26)
+                                    && b == 0.0
+                                    && self.state.fpscr & (1 << 4) != 0;
+                            if invalid_enabled || reciprocal_zero_divide_enabled {
                                 self.state.fpr[frt] = previous_fpr;
                             }
                         }
@@ -3207,7 +3211,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0;
-        cpu.state.fpscr = 0xB000_0000 | (1 << 9); // VXSQRT keeps the VX summary set
+        cpu.state.fpscr = 0xB000_0280; // VXSQRT + VE keep VX/FEX summaries asserted
 
         cpu.step(&mut memory).unwrap();
 
