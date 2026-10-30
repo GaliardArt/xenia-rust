@@ -70,8 +70,8 @@ Clippy for the initial PPC/memory implementation; each subsequent code change is
 being checked again.
 
 ### M2 — Memory and executable foundations
-- [ ] Add mapped address-space abstraction, endianness-safe access, permissions, and MMIO.
-- [ ] Parse executable/container metadata with malformed-input tests.
+- [x] Add mapped address-space abstraction, endianness-safe access, and region permissions; MMIO remains open.
+- [x] Parse XEX2 fixed/security metadata and Xbox PE32 headers with malformed-input tests.
 - [ ] Establish logging, errors, and diagnostics conventions.
 
 ### M3 — CPU interpreter
@@ -108,7 +108,8 @@ PE metadata. Unsupported CPU opcodes fail explicitly.
 This is not a complete Xbox 360 memory model or executable loader: MMIO, aliases,
 page-level permissions, decryption/decompression, PE section mapping, kernel
 services, concurrency, most PPC instructions and exception semantics remain
-future work. The CLI cannot run Xbox 360 games.
+future work. The CLI cannot run Xbox 360 games. Current CI runs `cargo fmt`, workspace tests,
+Clippy with warnings denied, and a CLI help smoke test.
 
 ## Local validation commands
 
