@@ -431,6 +431,47 @@ mod tests {
     }
 
     #[test]
+    fn doubleword_access_checks_region_bounds_and_permissions() {
+        let mut space = GuestAddressSpace::new();
+        space
+            .map(GuestAddress(0x4000), 8, MemoryPermissions::READ_WRITE)
+            .unwrap();
+        space
+            .write_u64_be(GuestAddress(0x4000), 0x0123_4567_89AB_CDEF)
+            .unwrap();
+        assert_eq!(
+            space.read_u64_be(GuestAddress(0x4000)),
+            Ok(0x0123_4567_89AB_CDEF)
+        );
+
+        space
+            .protect(GuestAddress(0x4000), MemoryPermissions::READ_ONLY)
+            .unwrap();
+        assert_eq!(
+            space.write_u64_be(GuestAddress(0x4000), 0),
+            Err(AddressSpaceError::PermissionDenied)
+        );
+    }
+
+    #[test]
+    fn doubleword_access_cannot_cross_adjacent_regions() {
+        let mut space = GuestAddressSpace::new();
+        space
+            .map(GuestAddress(0x5000), 4, MemoryPermissions::READ_WRITE)
+            .unwrap();
+        space
+            .map(GuestAddress(0x5004), 4, MemoryPermissions::READ_WRITE)
+            .unwrap();
+        assert_eq!(
+            space.write_u64_be(GuestAddress(0x5000), u64::MAX),
+            Err(AddressSpaceError::Memory(
+                crate::memory::MemoryError::OutOfBounds
+            ))
+        );
+        assert_eq!(space.read_u32_be(GuestAddress(0x5000)), Ok(0));
+    }
+
+    #[test]
     fn adjacent_regions_are_allowed_but_cross_region_word_access_is_rejected() {
         let mut space = GuestAddressSpace::new();
         space
