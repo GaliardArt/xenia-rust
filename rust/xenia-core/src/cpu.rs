@@ -54,7 +54,6 @@ fn round_shift_right_even(value: u32, shift: u32) -> u32 {
     truncated + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
 }
 
-#[cfg(test)]
 fn flush_vscr_nj_denormal(value: f32, vscr: u32) -> f32 {
     if vscr & (1 << 15) != 0 && value.is_subnormal() {
         f32::from_bits(value.to_bits() & 0x8000_0000)
@@ -63,6 +62,7 @@ fn flush_vscr_nj_denormal(value: f32, vscr: u32) -> f32 {
     }
 }
 
+#[cfg(test)]
 fn f32_to_f16_bits(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
