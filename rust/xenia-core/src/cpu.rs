@@ -3291,11 +3291,11 @@ impl PpcInterpreter {
                                 for (lane, pair) in [(1usize, 0usize), (3, 2)] {
                                     let first = u32::from_be_bytes(
                                         a[pair * 4..pair * 4 + 4].try_into().unwrap(),
-                                    ) as i32
-                                        as i64;
+                                    ) as i32 as i64;
                                     let second = u32::from_be_bytes(
                                         a[(pair + 1) * 4..(pair + 1) * 4 + 4].try_into().unwrap(),
-                                    ) as i32 as i64;
+                                    ) as i32
+                                        as i64;
                                     let accumulator = u32::from_be_bytes(
                                         b[lane * 4..lane * 4 + 4].try_into().unwrap(),
                                     ) as i32 as i64;
@@ -8778,7 +8778,10 @@ mod tests {
         assert_eq!(cpu.state.vr[0x65], core::array::from_fn(|i| i as u8));
         assert_eq!(cpu.state.vr[0x66], core::array::from_fn(|i| (13 + i) as u8));
         for index in 0..16 {
-            assert_eq!(memory.read_u8(GuestAddress(0x2050 + index)), Ok(index as u8));
+            assert_eq!(
+                memory.read_u8(GuestAddress(0x2050 + index)),
+                Ok(index as u8)
+            );
         }
     }
 
@@ -8804,20 +8807,26 @@ mod tests {
         );
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
 
-        cpu.state.vr[2] = [
-            0, 0, 0, 1, 0, 0, 0, 2,
-            0, 0, 0, 3, 0, 0, 0, 4,
-        ];
+        cpu.state.vr[2] = [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4];
         cpu.state.vr[3] = [0; 16];
         cpu.state.pc = 0x1004;
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][4..8].try_into().unwrap()), 3);
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()), 7);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][4..8].try_into().unwrap()),
+            3
+        );
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()),
+            7
+        );
 
         cpu.state.pc = 0x1008;
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.vr[1][..12], [0; 12]);
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()), 10);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()),
+            10
+        );
     }
 
 }
