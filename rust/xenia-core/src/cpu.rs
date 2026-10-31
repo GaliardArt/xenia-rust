@@ -2073,41 +2073,77 @@ impl PpcInterpreter {
                 self.state.vr[vd] = result;
                 self.state.pc = next_pc;
             }
-            // Xenon VMX128 three-register logical instructions (primary opcode 5).
+            // Xenon VMX128 operations using the architectural VX128/VX128_2 layouts.
             5 => {
                 let registers = decode_vmx128_register_fields(instruction);
-                let operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 0x1);
+                let operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 1);
                 let a = self.state.vr[registers.va];
                 let b = self.state.vr[registers.vb];
                 let mut result = [0_u8; 16];
+
+                // VX128_2: byte permute has an independent 3-bit control operand.
+                if instruction & ((1 << 9) | (1 << 4)) == 0 {
+                    let vd = registers.vd;
+                    let va = registers.va;
+                    let vb = registers.vb;
+                    let vc = ((instruction >> 6) & 0x7) as usize;
+                    let control = self.state.vr[vc];
+                    let left = self.state.vr[va];
+                    let right = self.state.vr[vb];
+                    for lane in 0..16 {
+                        let selector = (control[lane] & 0x1F) as usize;
+                        result[lane] = if selector < 16 {
+                            left[selector]
+                        } else {
+                            right[selector - 16]
+                        };
+                    }
+                    self.state.vr[vd] = result;
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
                 match operation {
-                    0b100001 => {
-                        for lane in 0..16 {
-                            result[lane] = a[lane] & b[lane];
+                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 => {
+                        // Four IEEE-754 binary32 lanes. Fused multiply-add variants
+                        // use the destination as the third source, as specified by VX128.
+                        let destination = self.state.vr[registers.vd];
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                            let dv = f32::from_bits(u32::from_be_bytes(destination[offset..offset + 4].try_into().unwrap()));
+                            let value = match operation {
+                                0b000001 => av + bv,
+                                0b000101 => av - bv,
+                                0b001001 => av * bv,
+                                0b001101 | 0b010001 => av.mul_add(dv, bv),
+                                0b010101 => bv - av * dv,
+                                _ => unreachable!(),
+                            };
+                            result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
                         }
                     }
-                    0b100101 => {
+                    0b100001 | 0b100101 | 0b101001 | 0b101101 | 0b110001 => {
                         for lane in 0..16 {
-                            result[lane] = a[lane] & !b[lane];
+                            result[lane] = match operation {
+                                0b100001 => a[lane] & b[lane],
+                                0b100101 => a[lane] & !b[lane],
+                                0b101001 => !(a[lane] | b[lane]),
+                                0b101101 => a[lane] | b[lane],
+                                0b110001 => a[lane] ^ b[lane],
+                                _ => unreachable!(),
+                            };
                         }
                     }
-                    0b101001 => {
+                    0b110101 => {
+                        // vsel128 uses the old destination as the per-bit selector.
+                        let mask = self.state.vr[registers.vd];
                         for lane in 0..16 {
-                            result[lane] = !(a[lane] | b[lane]);
-                        }
-                    }
-                    0b101101 => {
-                        for lane in 0..16 {
-                            result[lane] = a[lane] | b[lane];
-                        }
-                    }
-                    0b110001 => {
-                        for lane in 0..16 {
-                            result[lane] = a[lane] ^ b[lane];
+                            result[lane] = (a[lane] & !mask[lane]) | (b[lane] & mask[lane]);
                         }
                     }
                     0b111001 | 0b111101 => {
-                        // vslo128 / vsro128 shift the 128-bit vector by whole bytes.
                         let shift = (b[15] & 0x78) >> 3;
                         for lane in 0..16 {
                             let source_lane = if operation == 0b111001 {
@@ -2115,11 +2151,54 @@ impl PpcInterpreter {
                             } else {
                                 lane.checked_sub(shift as usize).unwrap_or(usize::MAX)
                             };
-                            result[lane] = if source_lane < 16 {
-                                a[source_lane]
+                            result[lane] = if source_lane < 16 { a[source_lane] } else { 0 };
+                        }
+                    }
+                    // Saturating and modulo pack operations.
+                    0b100000 | 0b100100 | 0b101000 | 0b101100 |
+                    0b110000 | 0b110100 | 0b111000 | 0b111100 => {
+                        let mut saturated = false;
+                        let mut out = 0;
+                        let signed_input = matches!(operation, 0b100000 | 0b100100 | 0b101000 | 0b101100);
+                        let word_input = matches!(operation, 0b101000 | 0b101100 | 0b111000 | 0b111100);
+                        for source in [a, b] {
+                            if word_input {
+                                for lane in 0..4 {
+                                    let offset = lane * 4;
+                                    let raw = u32::from_be_bytes(source[offset..offset + 4].try_into().unwrap());
+                                    let value = if signed_input { raw as i32 as i64 } else { raw as i64 };
+                                    let (packed, did_saturate) = match operation {
+                                        0b101000 => (value.clamp(i16::MIN as i64, i16::MAX as i64) as i16 as u16, value < i16::MIN as i64 || value > i16::MAX as i64),
+                                        0b101100 => (value.clamp(0, u16::MAX as i64) as u16, value < 0 || value > u16::MAX as i64),
+                                        0b111000 => (raw as u16, false),
+                                        0b111100 => (raw.min(u16::MAX as u32) as u16, raw > u16::MAX as u32),
+                                        _ => unreachable!(),
+                                    };
+                                    result[out..out + 2].copy_from_slice(&packed.to_be_bytes());
+                                    out += 2;
+                                    saturated |= did_saturate;
+                                }
                             } else {
-                                0
-                            };
+                                for lane in 0..8 {
+                                    let offset = lane * 2;
+                                    let raw = u16::from_be_bytes(source[offset..offset + 2].try_into().unwrap());
+                                    let value = if signed_input { raw as i16 as i64 } else { raw as i64 };
+                                    let (packed, did_saturate) = match operation {
+                                        0b100000 => (value.clamp(i8::MIN as i64, i8::MAX as i64) as i8 as u8, value < i8::MIN as i64 || value > i8::MAX as i64),
+                                        0b100100 => (value.clamp(0, u8::MAX as i64) as u8, value < 0 || value > u8::MAX as i64),
+                                        0b110000 => (raw as u8, false),
+                                        0b110100 => (raw.min(u8::MAX as u16) as u8, raw > u8::MAX as u16),
+                                        _ => unreachable!(),
+                                    };
+                                    result[out] = packed;
+                                    out += 1;
+                                    saturated |= did_saturate;
+                                }
+                            }
+                        }
+                        if saturated {
+                            // VSCR.SAT is architecturally sticky (bit 0 in PPC numbering).
+                            self.state.vscr |= 1 << 31;
                         }
                     }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
@@ -2127,29 +2206,106 @@ impl PpcInterpreter {
                 self.state.vr[registers.vd] = result;
                 self.state.pc = next_pc;
             }
-            // Xenon VMX128 word permutation with an 8-bit immediate.
+            // VMX128 extended shifts, comparisons, floating min/max, and permute-immediate.
             6 => {
-                // The generated Xenia decoder identifies vpermwi128 by reserved selector bits.
-                let selector = (((instruction >> 9) & 0x3) << 5) | ((instruction >> 4) & 0x3);
-                if selector != 0b0100001 {
-                    return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                let selector_p = (((instruction >> 9) & 0x3) << 5) | ((instruction >> 4) & 0x3);
+                if selector_p == 0b0100001 {
+                    let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
+                    let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
+                    let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
+                    let source = self.state.vr[vb];
+                    let mut result = [0_u8; 16];
+                    for output_word in 0..4 {
+                        let selector_shift = 6 - (output_word * 2);
+                        let source_word = ((permutation >> selector_shift) & 0x3) as usize;
+                        let source_start = source_word * 4;
+                        let output_start = output_word * 4;
+                        result[output_start..output_start + 4]
+                            .copy_from_slice(&source[source_start..source_start + 4]);
+                    }
+                    self.state.vr[vd] = result;
+                    self.state.pc = next_pc;
+                    return Ok(());
                 }
-                // VX128_P has a distinct layout from the three-register VX128 format.
-                let vd =
-                    (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
-                let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
-                let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
-                let source = self.state.vr[vb];
+
+                let registers = decode_vmx128_register_fields(instruction);
+                let a = self.state.vr[registers.va];
+                let b = self.state.vr[registers.vb];
+                let shift_operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 1);
+                let compare_operation = (((instruction >> 7) & 0x7) << 1) | ((instruction >> 4) & 1);
                 let mut result = [0_u8; 16];
-                for output_word in 0..4 {
-                    let selector_shift = 6 - (output_word * 2);
-                    let source_word = ((permutation >> selector_shift) & 0x3) as usize;
-                    let source_start = source_word * 4;
-                    let output_start = output_word * 4;
-                    result[output_start..output_start + 4]
-                        .copy_from_slice(&source[source_start..source_start + 4]);
+
+                match shift_operation {
+                    0b000101 | 0b001101 | 0b010101 | 0b011101 => {
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let value = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let amount = (u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()) & 0x1F) as u32;
+                            let shifted = match shift_operation {
+                                0b000101 => value.rotate_left(amount),
+                                0b001101 => value.wrapping_shl(amount),
+                                0b010101 => ((value as i32) >> amount) as u32,
+                                0b011101 => value.wrapping_shr(amount),
+                                _ => unreachable!(),
+                            };
+                            result[offset..offset + 4].copy_from_slice(&shifted.to_be_bytes());
+                        }
+                    }
+                    0b101000 | 0b101100 => {
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                            let value = if shift_operation == 0b101000 { av.max(bv) } else { av.min(bv) };
+                            result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                        }
+                    }
+                    0b110000 | 0b110100 => {
+                        for lane in 0..4 {
+                            let source_lane = if shift_operation == 0b110000 { lane } else { lane + 4 };
+                            result[lane * 4..lane * 4 + 4].copy_from_slice(&a[source_lane * 4..source_lane * 4 + 4]);
+                            result[(lane + 4) * 4..(lane + 4) * 4 + 4].copy_from_slice(&b[source_lane * 4..source_lane * 4 + 4]);
+                        }
+                    }
+                    0b111000 | 0b111100 => {
+                        for lane in 0..8 {
+                            let source_lane = if shift_operation == 0b111000 { lane } else { lane + 8 };
+                            let byte = a[source_lane];
+                            let value = (byte as i8 as i16).to_be_bytes();
+                            result[lane * 2..lane * 2 + 2].copy_from_slice(&value);
+                        }
+                    }
+                    _ => match compare_operation {
+                        0b000000 | 0b000010 | 0b000100 | 0b000110 | 0b100000 => {
+                            let mut all_true = true;
+                            let mut all_false = true;
+                            for lane in 0..4 {
+                                let offset = lane * 4;
+                                let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                                let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                                let af = f32::from_bits(av);
+                                let bf = f32::from_bits(bv);
+                                let condition = match compare_operation {
+                                    0b000000 => af == bf,
+                                    0b000010 => af >= bf,
+                                    0b000100 => af > bf,
+                                    0b000110 => af.is_nan() || bf.is_nan() || af < bf,
+                                    0b100000 => av == bv,
+                                    _ => unreachable!(),
+                                };
+                                let mask = if condition { u32::MAX } else { 0 };
+                                result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes());
+                                all_true &= condition;
+                                all_false &= !condition;
+                            }
+                            if instruction & (1 << 6) != 0 {
+                                self.state.cr[6] = if all_true { 0b1000 } else if all_false { 0b0010 } else { 0b0100 };
+                            }
+                        }
+                        _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                    },
                 }
-                self.state.vr[vd] = result;
+                self.state.vr[registers.vd] = result;
                 self.state.pc = next_pc;
             }
             // Floating-point displacement loads/stores.
