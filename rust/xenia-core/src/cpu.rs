@@ -3291,8 +3291,7 @@ impl PpcInterpreter {
                                         as i64;
                                     let exact = first + second + accumulator;
                                     saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
-                                    *word =
-                                        exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                                    *word = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
                                 }
                             }
                             1672 => {
