@@ -4194,8 +4194,14 @@ impl PpcInterpreter {
                                     u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
                                 let bv =
                                     u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
-                                let af = f32::from_bits(av);
-                                let bf = f32::from_bits(bv);
+                                let af = flush_vscr_nj_denormal(
+                                    f32::from_bits(av),
+                                    self.state.vscr,
+                                );
+                                let bf = flush_vscr_nj_denormal(
+                                    f32::from_bits(bv),
+                                    self.state.vscr,
+                                );
                                 let (mask, condition) = if compare_operation == 0b011000 {
                                     let unordered = af.is_nan() || bf.is_nan();
                                     let above_upper = af > bf || unordered;
