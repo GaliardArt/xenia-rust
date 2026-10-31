@@ -2877,10 +2877,9 @@ impl PpcInterpreter {
                             let offset = lane * 4;
                             let raw = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                             let value = if to_integer {
-                                let float = flush_vscr_nj_denormal(
-                                    f32::from_bits(raw),
-                                    self.state.vscr,
-                                ) * 2.0_f32.powi(scale as i32);
+                                let float =
+                                    flush_vscr_nj_denormal(f32::from_bits(raw), self.state.vscr)
+                                        * 2.0_f32.powi(scale as i32);
                                 if signed {
                                     if float.is_nan() {
                                         0
@@ -3884,10 +3883,8 @@ impl PpcInterpreter {
                         for lane in 0..4 {
                             let offset = lane * 4;
                             let raw = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
-                            let float = flush_vscr_nj_denormal(
-                                f32::from_bits(raw),
-                                self.state.vscr,
-                            );
+                            let float =
+                                flush_vscr_nj_denormal(f32::from_bits(raw), self.state.vscr);
                             let value = match unary_operation {
                                 0b0100011 => {
                                     let scaled = float * 2.0_f32.powi(immediate as i32);
@@ -9014,8 +9011,7 @@ mod tests {
         assert_eq!(&cpu.state.vr[1][8..12], &[0x3F, 0x80, 0, 0]);
 
         cpu.state.vr[5] = [
-            0x7F, 0x7F, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF,
-            0x40, 0, 0, 0, 0x3F, 0, 0, 0,
+            0x7F, 0x7F, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF, 0x40, 0, 0, 0, 0x3F, 0, 0, 0,
         ];
         cpu.state.pc = 0x1004;
         cpu.step(&mut memory).unwrap();
