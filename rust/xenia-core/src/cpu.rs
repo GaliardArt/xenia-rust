@@ -3984,6 +3984,11 @@ impl PpcInterpreter {
                         }
                         _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                     };
+                    // HIR Pack places its low 32/64-bit result in the
+                    // rightmost vector word(s), matching Xenia's word permute.
+                    let packed_low = packed[..packed_len].to_vec();
+                    packed = [0; 16];
+                    packed[16 - packed_len..].copy_from_slice(&packed_low);
                     let mut output = old;
                     let shift = ((instruction >> 6) & 3) as usize;
                     match pack_mode {
@@ -3995,25 +4000,26 @@ impl PpcInterpreter {
                         }
                         2 => {
                             if packed_len == 4 {
-                                let lane = 3 - shift.min(2);
-                                let offset = lane * 4;
-                                output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                                let offset = (3 - shift) * 4;
+                                output[offset..offset + 4].copy_from_slice(&packed[12..16]);
+                            } else if shift == 3 {
+                                output[..4].copy_from_slice(&packed[12..16]);
                             } else {
-                                let offset = [8, 4, 0, 0][shift];
-                                output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                                let offset = [8, 4, 0][shift];
+                                output[offset..offset + 8].copy_from_slice(&packed[8..16]);
                             }
                         }
                         3 => {
                             if packed_len == 4 {
                                 if shift != 3 {
                                     let offset = (3 - shift) * 4;
-                                    output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                                    output[offset..offset + 4].copy_from_slice(&packed[12..16]);
                                 }
                             } else if shift == 3 {
-                                output[12..16].copy_from_slice(&packed[..4]);
+                                output[12..16].copy_from_slice(&packed[8..12]);
                             } else {
                                 let offset = [8, 4, 0][shift];
-                                output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                                output[offset..offset + 8].copy_from_slice(&packed[8..16]);
                             }
                         }
                         _ => unreachable!(),
