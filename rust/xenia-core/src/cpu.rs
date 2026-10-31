@@ -3790,7 +3790,7 @@ impl PpcInterpreter {
                         }
                         6 => {
                             let packed = u64::from_be_bytes(b[8..16].try_into().unwrap());
-                            let sign_extend = |value: u64| ((value << 12) as i64 >> 12) as u32;
+                            let sign_extend = |value: u32| ((value << 12) as i32 >> 12) as u32;
                             [
                                 f32::from_bits(
                                     0x4040_0000_u32
@@ -4993,7 +4993,7 @@ mod tests {
         PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1, PPC_MSR_FP,
         PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE, PpcError,
         PpcException, PpcFpExceptionMode, PpcInterpreter, decode_vmx128_register_fields,
-        f16_bits_to_f32, f32_to_f16_bits,
+        f16_bits_to_f32, f32_to_f16_bits, f32_to_f16_bits_toward_zero,
     };
 
     fn fp_enabled_cpu() -> PpcInterpreter {
