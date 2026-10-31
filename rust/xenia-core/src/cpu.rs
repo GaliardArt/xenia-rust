@@ -124,9 +124,7 @@ pub enum PpcFpExceptionMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PpcException {
     /// An FP instruction was attempted while MSR[FP] was clear.
-    FloatingPointUnavailable {
-        instruction_pc: u32,
-    },
+    FloatingPointUnavailable { instruction_pc: u32 },
     FloatingPoint {
         instruction_pc: u32,
         causes: u32,
@@ -201,12 +199,9 @@ impl PpcInterpreter {
                 true,
                 PPC_PROGRAM_EXCEPTION_VECTOR,
             ),
-            PpcException::FloatingPointEnableTransition { next_pc, .. } => (
-                next_pc as u64,
-                true,
-                true,
-                PPC_PROGRAM_EXCEPTION_VECTOR,
-            ),
+            PpcException::FloatingPointEnableTransition { next_pc, .. } => {
+                (next_pc as u64, true, true, PPC_PROGRAM_EXCEPTION_VECTOR)
+            }
         };
 
         self.state.srr0 = saved_pc;
@@ -220,8 +215,7 @@ impl PpcInterpreter {
         } else {
             0
         };
-        self.state.srr1 =
-            (self.state.msr & SRR1_MSR_MASK) | fp_enabled_status | exception_status;
+        self.state.srr1 = (self.state.msr & SRR1_MSR_MASK) | fp_enabled_status | exception_status;
         self.state.msr = (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
         self.state.pc = vector;
 
@@ -5956,8 +5950,8 @@ mod tests {
     #[test]
     fn fpu_unavailable_gate_covers_arithmetic_loads_and_integer_transfers() {
         let instructions = [
-            (63 << 26) | (21 << 1), // fadd
-            48 << 26,               // lfs
+            (63 << 26) | (21 << 1),  // fadd
+            48 << 26,                // lfs
             (31 << 26) | (887 << 1), // lfiwzx
         ];
         for instruction in instructions {
@@ -6010,5 +6004,4 @@ mod tests {
         assert_eq!(cpu.state.fpr[1], 5.0);
         assert_eq!(cpu.state.pc, 0x1004);
     }
-
 }
