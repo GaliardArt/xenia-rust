@@ -1806,6 +1806,78 @@ impl PpcInterpreter {
                             self.state.gpr[ra] = address as u64;
                         }
                     }
+                    6 | 38 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let offset = (address & 0xF) as u8;
+                        let start = if xo == 6 { offset } else { 16_u8.wrapping_sub(offset) };
+                        let mut vector = [0_u8; 16];
+                        for (lane, byte) in vector.iter_mut().enumerate() {
+                            *byte = start.wrapping_add(lane as u8);
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    7 | 39 | 71 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let mut vector = self.state.vr[rt_rs];
+                        match xo {
+                            7 => {
+                                let lane = (address & 0xF) as usize;
+                                vector[lane] = memory.read_u8(GuestAddress(address)).map_err(Into::into)?;
+                            }
+                            39 => {
+                                let lane = ((address & 0xE) >> 1) as usize;
+                                let value = memory.read_u16_be(GuestAddress(address)).map_err(Into::into)?;
+                                vector[lane * 2..lane * 2 + 2].copy_from_slice(&value.to_be_bytes());
+                            }
+                            71 => {
+                                let lane = ((address & 0xC) >> 2) as usize;
+                                let value = memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?;
+                                vector[lane * 4..lane * 4 + 4].copy_from_slice(&value.to_be_bytes());
+                            }
+                            _ => unreachable!(),
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    135 | 167 | 199 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let vector = self.state.vr[rt_rs];
+                        match xo {
+                            135 => {
+                                let lane = (address & 0xF) as usize;
+                                memory.write_u8(GuestAddress(address), vector[lane]).map_err(Into::into)?;
+                            }
+                            167 => {
+                                let lane = ((address & 0xE) >> 1) as usize;
+                                let value = u16::from_be_bytes([vector[lane * 2], vector[lane * 2 + 1]]);
+                                memory.write_u16_be(GuestAddress(address), value).map_err(Into::into)?;
+                            }
+                            199 => {
+                                let lane = ((address & 0xC) >> 2) as usize;
+                                let value = u32::from_be_bytes(vector[lane * 4..lane * 4 + 4].try_into().unwrap());
+                                memory.write_u32_be(GuestAddress(address), value).map_err(Into::into)?;
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    359 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
+                        let mut vector = [0_u8; 16];
+                        for (index, byte) in vector.iter_mut().enumerate() {
+                            *byte = memory.read_u8(GuestAddress(address.wrapping_add(index as u32))).map_err(Into::into)?;
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    487 => {
+                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
+                        for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
+                            memory.write_u8(GuestAddress(address.wrapping_add(index as u32)), byte).map_err(Into::into)?;
+                        }
+                    }
                     103 => {
                         let base = if ra == 0 {
                             0
