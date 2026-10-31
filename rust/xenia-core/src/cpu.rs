@@ -8100,4 +8100,46 @@ mod tests {
             [0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18]
         );
     }
+    #[test]
+    fn altivec_vector_alignment_and_element_memory_operations_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x2000);
+        for offset in 0..0x100 {
+            memory.write_u8(GuestAddress(0x1000 + offset), offset as u8).unwrap();
+        }
+        let encode = |vd: u32, ra: u32, rb: u32, xo: u32| {
+            (31 << 26) | (vd << 21) | (ra << 16) | (rb << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x2000, encode(1, 3, 4, 6)); // lvsl
+        put_instruction(&mut memory, 0x2004, encode(2, 3, 4, 38)); // lvsr
+        put_instruction(&mut memory, 0x2008, encode(3, 3, 4, 7)); // lvebx
+        put_instruction(&mut memory, 0x200C, encode(4, 3, 5, 39)); // lvehx
+        put_instruction(&mut memory, 0x2010, encode(5, 3, 6, 71)); // lvewx
+        put_instruction(&mut memory, 0x2014, encode(3, 3, 4, 135)); // stvebx
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x2000;
+        cpu.state.gpr[3] = 0x1000;
+        cpu.state.gpr[4] = 5;
+        cpu.state.gpr[5] = 6;
+        cpu.state.gpr[6] = 8;
+        cpu.state.vr[3] = [0xAA; 16];
+        cpu.state.vr[4] = [0xBB; 16];
+        cpu.state.vr[5] = [0xCC; 16];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[2], [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[3][5], 5);
+        assert_eq!(cpu.state.vr[3][4], 0xAA);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[4][6..8], &[6, 7]);
+        assert_eq!(&cpu.state.vr[4][4..6], &[0xBB, 0xBB]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[5][8..12], &[8, 9, 10, 11]);
+        cpu.state.vr[3][5] = 0xE5;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
+    }
+
 }
