@@ -4814,7 +4814,8 @@ mod tests {
     use super::{
         PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1, PPC_MSR_FP,
         PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE, PpcError,
-        PpcException, PpcFpExceptionMode, PpcInterpreter, f16_bits_to_f32, f32_to_f16_bits,
+        PpcException, PpcFpExceptionMode, PpcInterpreter, decode_vmx128_register_fields,
+        f16_bits_to_f32, f32_to_f16_bits,
     };
 
     fn fp_enabled_cpu() -> PpcInterpreter {
@@ -8988,7 +8989,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
         let encode = |xo: u32| (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | xo;
         for (index, xo) in [36_u32, 37, 38, 39, 40, 41].into_iter().enumerate() {
-            put_instruction(&mut memory, 0x1000 + index as u64 * 4, encode(xo));
+            put_instruction(&mut memory, 0x1000 + index as u32 * 4, encode(xo));
         }
 
         let mut cpu = fp_enabled_cpu();
