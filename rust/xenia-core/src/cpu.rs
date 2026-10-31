@@ -7726,4 +7726,33 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn classic_altivec_arithmetic_compare_splat_and_permute_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
+        let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode(1, 2, 3, 2)); // vmaxub
+        put_instruction(&mut memory, 0x1004, encode(1, 2, 3, 512)); // vaddubs
+        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 7)); // vcmpequb Rc
+        put_instruction(&mut memory, 0x100C, encode(1, 0x1E, 3, 780)); // vspltisb -2
+        put_instruction(&mut memory, 0x1010, encode(1, 2, 3, 43 | (5 << 6))); // vperm
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250, 6, 249, 7, 248];
+        cpu.state.vr[3] = [255, 0, 254, 1, 253, 2, 252, 3, 251, 4, 250, 5, 249, 6, 248, 7];
+        cpu.state.vr[5] = [0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], [255, 255, 254, 254, 253, 253, 252, 252, 251, 251, 250, 250, 249, 249, 248, 248]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[6], 0b0010);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], [0xFE; 16]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]);
+    }
+
 }
