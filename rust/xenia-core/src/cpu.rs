@@ -9000,19 +9000,15 @@ mod tests {
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x25] = [
-            0x40, 0x40, 0, 1, 0x40, 0x40, 0, 2,
-            0x40, 0x40, 0, 3, 0x40, 0x40, 0, 4,
+            0x40, 0x40, 0, 1, 0x40, 0x40, 0, 2, 0x40, 0x40, 0, 3, 0x40, 0x40, 0, 4,
         ];
         cpu.state.vr[0x46] = [0xCD; 16];
         cpu.step(&mut memory).unwrap();
-        assert_eq!(
-            &cpu.state.vr[0x46][12..16],
-            &[0x04, 0x01, 0x02, 0x03]
-        );
+        assert_eq!(&cpu.state.vr[0x46][12..16], &[0x04, 0x01, 0x02, 0x03]);
 
         cpu.state.vr[0x25] = [
-            0x44, 0x9A, 0x40, 0x00, 0x45, 0xB1, 0x70, 0x00,
-            0x41, 0x10, 0x32, 0x61, 0x40, 0x92, 0x2B, 0x6B,
+            0x44, 0x9A, 0x40, 0x00, 0x45, 0xB1, 0x70, 0x00, 0x41, 0x10, 0x32, 0x61, 0x40, 0x92,
+            0x2B, 0x6B,
         ];
         cpu.state.vr[0x46] = [0xCD; 16];
         cpu.step(&mut memory).unwrap();
@@ -9047,22 +9043,34 @@ mod tests {
         let cases = [
             (
                 0,
-                [0xCD_u8; 12].into_iter().chain([0x04, 0x01, 0x02, 0x03]).collect::<Vec<_>>(),
+                [0xCD_u8; 12]
+                    .into_iter()
+                    .chain([0x04, 0x01, 0x02, 0x03])
+                    .collect::<Vec<_>>(),
                 [0x3F80_0001, 0x3F80_0002, 0x3F80_0003, 0x3F80_0004],
             ),
             (
                 1,
-                [0xCD; 12].into_iter().chain([0x7F, 0xFF, 0x80, 0x01]).collect::<Vec<_>>(),
+                [0xCD_u8; 12]
+                    .into_iter()
+                    .chain([0x7F, 0xFF, 0x80, 0x01])
+                    .collect::<Vec<_>>(),
                 [0x4040_7FFF, 0x403F_8001, 0, 0x3F80_0000],
             ),
             (
                 3,
-                [0xCD; 12].into_iter().chain([0x38, 0x00, 0xB8, 0x00]).collect::<Vec<_>>(),
+                [0xCD_u8; 12]
+                    .into_iter()
+                    .chain([0x38, 0x00, 0xB8, 0x00])
+                    .collect::<Vec<_>>(),
                 [0x3F00_0000, 0xBF00_0000, 0, 0x3F80_0000],
             ),
             (
                 5,
-                [0xCD_u8; 8].into_iter().chain([0x38, 0x00, 0xB8, 0x01, 0x38, 0x02, 0xB8, 0x03]).collect::<Vec<_>>(),
+                [0xCD_u8; 8]
+                    .into_iter()
+                    .chain([0x38, 0x00, 0xB8, 0x01, 0x38, 0x02, 0xB8, 0x03])
+                    .collect::<Vec<_>>(),
                 [0x3F00_0000, 0xBF00_2000, 0x3F00_4000, 0xBF00_6000],
             ),
         ];
