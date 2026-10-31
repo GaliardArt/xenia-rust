@@ -3451,38 +3451,94 @@ impl PpcInterpreter {
                 // VX128_4 immediate word rotate/insert.
                 let special_selector =
                     (((instruction >> 8) & 0x7) << 4) | ((instruction >> 4) & 0x3);
-                // VX128_4 vpkd3d128: pack binary32 lanes into half floats.
+                // VX128_4 vpkd3d128 packs the D3D vertex formats.
                 if special_selector == 0b1100001 {
                     let immediate = (instruction >> 16) & 0x1F;
                     let pack_type = immediate >> 2;
                     let pack_mode = immediate & 3;
-                    if !matches!(pack_type, 3 | 5) {
-                        return Err(PpcError::UnsupportedInstruction { pc, opcode });
-                    }
-                    let lane_count = if pack_type == 3 { 2 } else { 4 };
                     let source = self.state.vr[registers.vb];
                     let old = self.state.vr[registers.vd];
-                    let mut packed = [0_u8; 16];
-                    for lane in 0..lane_count {
+                    let floats = std::array::from_fn::<_, 4, _>(|lane| {
                         let offset = lane * 4;
-                        let value = f32::from_bits(u32::from_be_bytes(
+                        f32::from_bits(u32::from_be_bytes(
                             source[offset..offset + 4].try_into().unwrap(),
-                        ));
-                        packed[lane * 2..lane * 2 + 2]
-                            .copy_from_slice(&f32_to_f16_bits(value).to_be_bytes());
-                    }
+                        ))
+                    });
+                    let unorm = |value: f32, max: u32| {
+                        (value.clamp(0.0, 1.0) * max as f32).round() as u32
+                    };
+                    let snorm = |value: f32| {
+                        (value.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
+                    };
+                    let mut packed = [0_u8; 16];
+                    let packed_len = match pack_type {
+                        0 => {
+                            packed[..4].copy_from_slice(&[
+                                unorm(floats[3], 255) as u8,
+                                unorm(floats[0], 255) as u8,
+                                unorm(floats[1], 255) as u8,
+                                unorm(floats[2], 255) as u8,
+                            ]);
+                            4
+                        }
+                        1 => {
+                            for lane in 0..2 {
+                                packed[lane * 2..lane * 2 + 2]
+                                    .copy_from_slice(&snorm(floats[lane]).to_be_bytes());
+                            }
+                            4
+                        }
+                        2 => {
+                            let value = unorm(floats[0], 1023)
+                                | (unorm(floats[1], 1023) << 10)
+                                | (unorm(floats[2], 1023) << 20)
+                                | (unorm(floats[3], 3) << 30);
+                            packed[..4].copy_from_slice(&value.to_be_bytes());
+                            4
+                        }
+                        3 => {
+                            for lane in 0..2 {
+                                packed[lane * 2..lane * 2 + 2]
+                                    .copy_from_slice(&f32_to_f16_bits(floats[lane]).to_be_bytes());
+                            }
+                            4
+                        }
+                        4 => {
+                            for lane in 0..4 {
+                                packed[lane * 2..lane * 2 + 2]
+                                    .copy_from_slice(&snorm(floats[lane]).to_be_bytes());
+                            }
+                            8
+                        }
+                        5 => {
+                            for lane in 0..4 {
+                                packed[lane * 2..lane * 2 + 2]
+                                    .copy_from_slice(&f32_to_f16_bits(floats[lane]).to_be_bytes());
+                            }
+                            8
+                        }
+                        6 => {
+                            let value = unorm(floats[0], 0xF_FFFF) as u64
+                                | ((unorm(floats[1], 0xF_FFFF) as u64) << 20)
+                                | ((unorm(floats[2], 0xF_FFFF) as u64) << 40)
+                                | ((unorm(floats[3], 0xF) as u64) << 60);
+                            packed[..8].copy_from_slice(&value.to_be_bytes());
+                            8
+                        }
+                        _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                    };
                     let mut output = old;
+                    let shift = ((instruction >> 6) & 3) as usize;
                     match pack_mode {
                         0 => output = packed,
                         1 => {
-                            let shift = ((instruction >> 6) & 3) as usize;
                             let offset = shift * 4;
                             output[offset..offset + 4].copy_from_slice(&packed[..4]);
                         }
                         2 | 3 => {
-                            let shift = ((instruction >> 6) & 3) as usize;
                             let offset = (shift & 1) * 8;
-                            output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                            let count = packed_len.min(8);
+                            output[offset..offset + count].copy_from_slice(&packed[..count]);
                         }
                         _ => unreachable!(),
                     }
