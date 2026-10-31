@@ -9000,7 +9000,7 @@ mod tests {
         cpu.state.vr[2] = [
             0, 0, 0, 1, 0x80, 0, 0, 1, 0x3F, 0x80, 0, 0, 0x3F, 0x80, 0, 0,
         ];
-        cpu.state.vr[3] = [0; 16];
+        cpu.state.vr[3] = [0, 0, 0, 0, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         cpu.step(&mut memory).unwrap();
         assert_eq!(&cpu.state.vr[1][..4], &[0, 0, 0, 1]);
         assert_eq!(&cpu.state.vr[1][4..8], &[0x80, 0, 0, 1]);
