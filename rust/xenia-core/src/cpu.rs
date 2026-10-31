@@ -8909,11 +8909,7 @@ mod tests {
             (1859, 0x2023), // stvrxl128
         ] {
             let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x22);
-            put_instruction(
-                &mut memory,
-                0x2000,
-                encode_memory(selector, 0x65, 1, 2),
-            );
+            put_instruction(&mut memory, 0x2000, encode_memory(selector, 0x65, 1, 2));
             let mut cpu = fp_enabled_cpu();
             cpu.state.pc = 0x2000;
             cpu.state.gpr[1] = address;
