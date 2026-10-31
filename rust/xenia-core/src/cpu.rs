@@ -9112,7 +9112,7 @@ mod tests {
         cpu.step(&mut memory).unwrap(); // lvrx
         assert_eq!(
             cpu.state.vr[1],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3,]
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]
         );
         cpu.step(&mut memory).unwrap(); // lvrxl
         assert_eq!(
