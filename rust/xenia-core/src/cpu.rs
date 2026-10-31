@@ -2292,34 +2292,25 @@ impl PpcInterpreter {
                             self.state.vr[vd] = vector;
                         }
                         451 | 963 => {
-                            for (lane, byte) in vector.iter().enumerate() {
-                                memory
-                                    .write_u8(
-                                        GuestAddress(aligned.wrapping_add(lane as u32)),
-                                        *byte,
-                                    )
-                                    .map_err(Into::into)?;
-                            }
+                            memory
+                                .write_bytes(GuestAddress(aligned), &vector)
+                                .map_err(Into::into)?;
                         }
                         1283 | 1795 => {
-                            for (lane, byte) in vector[..16 - offset].iter().enumerate() {
-                                memory
-                                    .write_u8(
-                                        GuestAddress(aligned.wrapping_add((offset + lane) as u32)),
-                                        *byte,
-                                    )
-                                    .map_err(Into::into)?;
-                            }
+                            memory
+                                .write_bytes(
+                                    GuestAddress(aligned.wrapping_add(offset as u32)),
+                                    &vector[..16 - offset],
+                                )
+                                .map_err(Into::into)?;
                         }
                         1347 | 1859 => {
-                            for (lane, byte) in vector[16 - offset..].iter().enumerate() {
-                                memory
-                                    .write_u8(
-                                        GuestAddress(aligned.wrapping_add(lane as u32)),
-                                        *byte,
-                                    )
-                                    .map_err(Into::into)?;
-                            }
+                            memory
+                                .write_bytes(
+                                    GuestAddress(aligned),
+                                    &vector[16 - offset..],
+                                )
+                                .map_err(Into::into)?;
                         }
                         _ => unreachable!(),
                     }
