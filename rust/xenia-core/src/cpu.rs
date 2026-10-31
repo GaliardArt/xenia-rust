@@ -7973,7 +7973,7 @@ mod tests {
     }
     #[test]
     fn classic_altivec_merge_and_multiply_accumulate_operations_execute() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
             (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
         };
