@@ -8979,6 +8979,114 @@ mod tests {
         assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
     }
     #[test]
+    fn vmx128_d3d_pack_matches_independent_xenia_reference_vectors() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_pack = |immediate: u32, shift: u32| {
+            let vd = 0x46_u32;
+            let vb = 0x25_u32;
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (6 << 8)
+                | (shift << 6)
+                | (1 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        put_instruction(&mut memory, 0x1000, encode_pack(1, 0)); // D3DCOLOR, mask 1
+        put_instruction(&mut memory, 0x1004, encode_pack(22, 0)); // FLOAT16_4, mask 2
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x25] = [
+            0x40, 0x40, 0, 1, 0x40, 0x40, 0, 2,
+            0x40, 0x40, 0, 3, 0x40, 0x40, 0, 4,
+        ];
+        cpu.state.vr[0x46] = [0xCD; 16];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            &cpu.state.vr[0x46][12..16],
+            &[0x04, 0x01, 0x02, 0x03]
+        );
+
+        cpu.state.vr[0x25] = [
+            0x44, 0x9A, 0x40, 0x00, 0x45, 0xB1, 0x70, 0x00,
+            0x41, 0x10, 0x32, 0x61, 0x40, 0x92, 0x2B, 0x6B,
+        ];
+        cpu.state.vr[0x46] = [0xCD; 16];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            &cpu.state.vr[0x46][8..16],
+            &[0x64, 0xD2, 0x6D, 0x8B, 0x48, 0x81, 0x44, 0x91]
+        );
+    }
+
+    #[test]
+    fn vmx128_d3d_unpack_matches_independent_xenia_reference_vectors() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_unpack = |immediate: u32| {
+            let vd = 0x46_u32;
+            let vb = 0x25_u32;
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (0b1111111 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        for (index, immediate) in [0, 4, 12, 20].into_iter().enumerate() {
+            put_instruction(
+                &mut memory,
+                0x1000 + index as u32 * 4,
+                encode_unpack(immediate),
+            );
+        }
+
+        let cases = [
+            (
+                0,
+                [0xCD; 12].into_iter().chain([0x04, 0x01, 0x02, 0x03]).collect::<Vec<_>>(),
+                [0x3F80_0001, 0x3F80_0002, 0x3F80_0003, 0x3F80_0004],
+            ),
+            (
+                1,
+                [0xCD; 12].into_iter().chain([0x7F, 0xFF, 0x80, 0x01]).collect::<Vec<_>>(),
+                [0x4040_7FFF, 0x403F_8001, 0, 0x3F80_0000],
+            ),
+            (
+                3,
+                [0xCD; 12].into_iter().chain([0x38, 0x00, 0xB8, 0x00]).collect::<Vec<_>>(),
+                [0x3F00_0000, 0xBF00_0000, 0, 0x3F80_0000],
+            ),
+            (
+                5,
+                [0xCD; 8].into_iter().chain([0x38, 0x00, 0xB8, 0x01, 0x38, 0x02, 0xB8, 0x03]).collect::<Vec<_>>(),
+                [0x3F00_0000, 0xBF00_2000, 0x3F00_4000, 0xBF00_6000],
+            ),
+        ];
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        for (index, (pack_type, source, expected)) in cases.into_iter().enumerate() {
+            cpu.state.vr[0x25].copy_from_slice(&source);
+            cpu.step(&mut memory).unwrap();
+            let actual: [u32; 4] = core::array::from_fn(|lane| {
+                u32::from_be_bytes(
+                    cpu.state.vr[0x46][lane * 4..lane * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            });
+            assert_eq!(actual, expected, "D3D unpack type {pack_type}");
+            if index + 1 < 4 {
+                cpu.state.pc = 0x1000 + (index as u32 + 1) * 4;
+            }
+        }
+    }
+
+    #[test]
     fn vmx128_d3d_pack_modes_place_packed_words_by_selector() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
         let encode_pack = |immediate: u32, shift: u32| {
