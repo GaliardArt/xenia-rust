@@ -7971,4 +7971,48 @@ mod tests {
             [0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 9]
         );
     }
+    #[test]
+    fn classic_altivec_merge_and_multiply_accumulate_operations_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        let encode_va = |vd: u32, va: u32, vb: u32, vc: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | (vc << 6) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode_vx(1, 2, 3, 12)); // vmrghb
+        put_instruction(&mut memory, 0x1004, encode_va(1, 2, 3, 4, 32)); // vmhaddshs
+        put_instruction(&mut memory, 0x1008, encode_va(1, 2, 3, 4, 36)); // vmsumubm
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [1; 16];
+        cpu.state.vr[3] = [2; 16];
+        cpu.state.vr[4] = [0; 16];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]
+        );
+
+        cpu.state.vr[2] = [0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0, 0x40, 0];
+        cpu.state.vr[3] = cpu.state.vr[2];
+        cpu.state.vr[4] = [0; 16];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0, 0x20, 0]
+        );
+
+        cpu.state.vr[2] = [1; 16];
+        cpu.state.vr[3] = [2; 16];
+        cpu.state.vr[4] = [0; 16];
+        cpu.state.vr[4][12..16].copy_from_slice(&10_u32.to_be_bytes());
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18]
+        );
+    }
+
 }
