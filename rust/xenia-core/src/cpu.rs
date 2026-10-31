@@ -8511,4 +8511,17 @@ mod tests {
             [1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12]
         );
     }
+    #[test]
+    fn binary16_conversion_helpers_cover_normal_subnormal_and_special_values() {
+        assert_eq!(f32_to_f16_bits(1.0), 0x3C00);
+        assert_eq!(f32_to_f16_bits(-2.0), 0xC000);
+        assert_eq!(f32_to_f16_bits(0.5), 0x3800);
+        assert_eq!(f32_to_f16_bits(65504.0), 0x7BFF);
+        assert_eq!(f32_to_f16_bits(f32::INFINITY), 0x7C00);
+        assert_eq!(f16_bits_to_f32(0x3C00), 1.0);
+        assert_eq!(f16_bits_to_f32(0xC000), -2.0);
+        assert_eq!(f16_bits_to_f32(0x0001), 2.0_f32.powi(-24));
+        assert!(f16_bits_to_f32(0x7E00).is_nan());
+    }
+
 }
