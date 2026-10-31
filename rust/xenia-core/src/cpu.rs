@@ -2892,6 +2892,20 @@ impl PpcInterpreter {
                             };
                         }
                     }
+                    _ if instruction & 0x10 != 0 => {
+                        let registers = decode_vmx128_register_fields(instruction);
+                        let shift = ((instruction >> 6) & 0xF) as usize;
+                        let source_a = self.state.vr[registers.va];
+                        let source_b = self.state.vr[registers.vb];
+                        let mut joined = [0_u8; 32];
+                        joined[..16].copy_from_slice(&source_a);
+                        joined[16..].copy_from_slice(&source_b);
+                        let mut shifted = [0_u8; 16];
+                        shifted.copy_from_slice(&joined[shift..shift + 16]);
+                        self.state.vr[registers.vd] = shifted;
+                        self.state.pc = next_pc;
+                        return Ok(());
+                    }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.vr[vd] = result;
