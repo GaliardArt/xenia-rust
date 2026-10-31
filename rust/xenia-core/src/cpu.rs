@@ -2111,6 +2111,24 @@ impl PpcInterpreter {
                 self.state.vr[registers.vd] = result;
                 self.state.pc = next_pc;
             }
+            // Xenon VMX128 word permutation with an 8-bit immediate.
+            6 => {
+                let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
+                let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
+                let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
+                let source = self.state.vr[vb];
+                let mut result = [0_u8; 16];
+                for output_word in 0..4 {
+                    let selector_shift = 6 - (output_word * 2);
+                    let source_word = ((permutation >> selector_shift) & 0x3) as usize;
+                    let source_start = source_word * 4;
+                    let output_start = output_word * 4;
+                    result[output_start..output_start + 4]
+                        .copy_from_slice(&source[source_start..source_start + 4]);
+                }
+                self.state.vr[vd] = result;
+                self.state.pc = next_pc;
+            }
             // Floating-point displacement loads/stores.
             48..=51 => {
                 let update = matches!(opcode, 49 | 51);
@@ -5163,6 +5181,49 @@ mod tests {
             assert_eq!(cpu.state.vr[0x7D], expected, "operation {operation:#08b}");
             assert_eq!(cpu.state.pc, 0x1004 + index as u32 * 4);
         }
+    }
+
+    #[test]
+    fn vmx128_word_permutation_immediate_uses_extended_registers_and_guest_word_order() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_vpermwi128 = |vd: u32, vb: u32, permutation: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((permutation & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((permutation >> 5) & 0x7) << 6)
+                | (((vd >> 5) & 0x3) << 2)
+                | ((vb >> 5) & 0x3)
+        };
+        // Identity permutation, followed by reverse word order.
+        put_instruction(&mut memory, 0x1000, encode_vpermwi128(0x7D, 0x43, 0x1B));
+        put_instruction(&mut memory, 0x1004, encode_vpermwi128(0x7D, 0x43, 0xE4));
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x43] = [
+            0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23, 0x30, 0x31,
+            0x32, 0x33,
+        ];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0x00, 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23, 0x30, 0x31,
+                0x32, 0x33,
+            ]
+        );
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0x30, 0x31, 0x32, 0x33, 0x20, 0x21, 0x22, 0x23, 0x10, 0x11, 0x12, 0x13, 0x00, 0x01,
+                0x02, 0x03,
+            ]
+        );
+        assert_eq!(cpu.state.pc, 0x1008);
     }
 
     #[test]
