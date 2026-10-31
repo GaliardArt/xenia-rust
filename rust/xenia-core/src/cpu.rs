@@ -2198,8 +2198,9 @@ impl PpcInterpreter {
             // Initial VMX integer/logic subset (standard 5-bit register forms).
             4 => {
                 // Xenon VMX128 indexed memory forms use a dedicated VX128_1
-                // register layout and an 8-bit selector split around the opcode.
-                let memory_selector = (((instruction >> 4) & 0x7F) << 2) | (instruction & 0x3);
+                // register layout and a selector formed from instruction bits 21..27
+                // followed by bits 30..31, matching Xenia's VX128_1 decoder.
+                let memory_selector = (((instruction >> 4) & 0x7F) << 4) | (instruction & 0x3);
                 if matches!(
                     memory_selector,
                     3 | 67
@@ -8861,7 +8862,7 @@ mod tests {
                 | ((vd & 0x1F) << 21)
                 | ((ra & 0x1F) << 16)
                 | ((rb & 0x1F) << 11)
-                | (((selector >> 2) & 0x7F) << 4)
+                | (((selector >> 4) & 0x7F) << 4)
                 | (selector & 3)
                 | (((vd >> 5) & 3) << 2)
         };
