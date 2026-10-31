@@ -2014,8 +2014,10 @@ impl PpcInterpreter {
                     0x080 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
-                            let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                            let av =
+                                    u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let bv =
+                                    u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                             result[offset..offset + 4]
                                 .copy_from_slice(&av.wrapping_add(bv).to_be_bytes());
                         }
@@ -2110,9 +2112,15 @@ impl PpcInterpreter {
                         let destination = self.state.vr[registers.vd];
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
-                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
-                            let dv = f32::from_bits(u32::from_be_bytes(destination[offset..offset + 4].try_into().unwrap()));
+                            let av = f32::from_bits(u32::from_be_bytes(
+                                a[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            let bv = f32::from_bits(u32::from_be_bytes(
+                                b[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            let dv = f32::from_bits(u32::from_be_bytes(
+                                destination[offset..offset + 4].try_into().unwrap(),
+                            ));
                             let value = match operation {
                                 0b000001 => av + bv,
                                 0b000101 => av - bv,
@@ -2121,7 +2129,8 @@ impl PpcInterpreter {
                                 0b010101 => bv - av * dv,
                                 _ => unreachable!(),
                             };
-                            result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                            result[offset..offset + 4]
+                                .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
                     }
                     0b100001 | 0b100101 | 0b101001 | 0b101101 | 0b110001 => {
@@ -2155,23 +2164,40 @@ impl PpcInterpreter {
                         }
                     }
                     // Saturating and modulo pack operations.
-                    0b100000 | 0b100100 | 0b101000 | 0b101100 |
-                    0b110000 | 0b110100 | 0b111000 | 0b111100 => {
+                    0b100000 | 0b100100 | 0b101000 | 0b101100 | 0b110000 | 0b110100 | 0b111000
+                    | 0b111100 => {
                         let mut saturated = false;
                         let mut out = 0;
-                        let signed_input = matches!(operation, 0b100000 | 0b100100 | 0b101000 | 0b101100);
-                        let word_input = matches!(operation, 0b101000 | 0b101100 | 0b111000 | 0b111100);
+                        let signed_input =
+                            matches!(operation, 0b100000 | 0b100100 | 0b101000 | 0b101100);
+                        let word_input =
+                            matches!(operation, 0b101000 | 0b101100 | 0b111000 | 0b111100);
                         for source in [a, b] {
                             if word_input {
                                 for lane in 0..4 {
                                     let offset = lane * 4;
-                                    let raw = u32::from_be_bytes(source[offset..offset + 4].try_into().unwrap());
-                                    let value = if signed_input { raw as i32 as i64 } else { raw as i64 };
+                                    let raw = u32::from_be_bytes(
+                                        source[offset..offset + 4].try_into().unwrap(),
+                                    );
+                                    let value = if signed_input {
+                                        raw as i32 as i64
+                                    } else {
+                                        raw as i64
+                                    };
                                     let (packed, did_saturate) = match operation {
-                                        0b101000 => (value.clamp(i16::MIN as i64, i16::MAX as i64) as i16 as u16, value < i16::MIN as i64 || value > i16::MAX as i64),
-                                        0b101100 => (value.clamp(0, u16::MAX as i64) as u16, value < 0 || value > u16::MAX as i64),
+                                        0b101000 => (
+                                            value.clamp(i16::MIN as i64, i16::MAX as i64) as i16
+                                                as u16,
+                                            value < i16::MIN as i64 || value > i16::MAX as i64,
+                                        ),
+                                        0b101100 => (
+                                            value.clamp(0, u16::MAX as i64) as u16,
+                                            value < 0 || value > u16::MAX as i64,
+                                        ),
                                         0b111000 => (raw as u16, false),
-                                        0b111100 => (raw.min(u16::MAX as u32) as u16, raw > u16::MAX as u32),
+                                        0b111100 => {
+                                            (raw.min(u16::MAX as u32) as u16, raw > u16::MAX as u32)
+                                        }
                                         _ => unreachable!(),
                                     };
                                     result[out..out + 2].copy_from_slice(&packed.to_be_bytes());
@@ -2181,13 +2207,27 @@ impl PpcInterpreter {
                             } else {
                                 for lane in 0..8 {
                                     let offset = lane * 2;
-                                    let raw = u16::from_be_bytes(source[offset..offset + 2].try_into().unwrap());
-                                    let value = if signed_input { raw as i16 as i64 } else { raw as i64 };
+                                    let raw = u16::from_be_bytes(
+                                        source[offset..offset + 2].try_into().unwrap(),
+                                    );
+                                    let value = if signed_input {
+                                        raw as i16 as i64
+                                    } else {
+                                        raw as i64
+                                    };
                                     let (packed, did_saturate) = match operation {
-                                        0b100000 => (value.clamp(i8::MIN as i64, i8::MAX as i64) as i8 as u8, value < i8::MIN as i64 || value > i8::MAX as i64),
-                                        0b100100 => (value.clamp(0, u8::MAX as i64) as u8, value < 0 || value > u8::MAX as i64),
+                                        0b100000 => (
+                                            value.clamp(i8::MIN as i64, i8::MAX as i64) as i8 as u8,
+                                            value < i8::MIN as i64 || value > i8::MAX as i64,
+                                        ),
+                                        0b100100 => (
+                                            value.clamp(0, u8::MAX as i64) as u8,
+                                            value < 0 || value > u8::MAX as i64,
+                                        ),
                                         0b110000 => (raw as u8, false),
-                                        0b110100 => (raw.min(u8::MAX as u16) as u8, raw > u8::MAX as u16),
+                                        0b110100 => {
+                                            (raw.min(u8::MAX as u16) as u8, raw > u8::MAX as u16)
+                                        }
                                         _ => unreachable!(),
                                     };
                                     result[out] = packed;
@@ -2210,9 +2250,11 @@ impl PpcInterpreter {
             6 => {
                 let selector_p = (((instruction >> 9) & 0x3) << 5) | ((instruction >> 4) & 0x3);
                 if selector_p == 0b0100001 {
-                    let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
+                    let vd =
+                        (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
                     let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
-                    let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
+                    let permutation =
+                        ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
                     let source = self.state.vr[vb];
                     let mut result = [0_u8; 16];
                     for output_word in 0..4 {
@@ -2232,15 +2274,19 @@ impl PpcInterpreter {
                 let a = self.state.vr[registers.va];
                 let b = self.state.vr[registers.vb];
                 let shift_operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 1);
-                let compare_operation = (((instruction >> 7) & 0x7) << 3) | ((instruction >> 4) & 1);
+                let compare_operation =
+                    (((instruction >> 7) & 0x7) << 3) | ((instruction >> 4) & 1);
                 let mut result = [0_u8; 16];
 
                 match shift_operation {
                     0b000101 | 0b001101 | 0b010101 | 0b011101 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let value = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
-                            let amount = (u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()) & 0x1F) as u32;
+                            let value =
+                                u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let amount =
+                                (u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap())
+                                    & 0x1F) as u32;
                             let shifted = match shift_operation {
                                 0b000101 => value.rotate_left(amount),
                                 0b001101 => value.wrapping_shl(amount),
@@ -2254,22 +2300,41 @@ impl PpcInterpreter {
                     0b101000 | 0b101100 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
-                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
-                            let value = if shift_operation == 0b101000 { av.max(bv) } else { av.min(bv) };
-                            result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                            let av = f32::from_bits(u32::from_be_bytes(
+                                a[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            let bv = f32::from_bits(u32::from_be_bytes(
+                                b[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            let value = if shift_operation == 0b101000 {
+                                av.max(bv)
+                            } else {
+                                av.min(bv)
+                            };
+                            result[offset..offset + 4]
+                                .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
                     }
                     0b110000 | 0b110100 => {
                         for lane in 0..4 {
-                            let source_lane = if shift_operation == 0b110000 { lane } else { lane + 4 };
-                            result[lane * 4..lane * 4 + 4].copy_from_slice(&a[source_lane * 4..source_lane * 4 + 4]);
-                            result[(lane + 4) * 4..(lane + 4) * 4 + 4].copy_from_slice(&b[source_lane * 4..source_lane * 4 + 4]);
+                            let source_lane = if shift_operation == 0b110000 {
+                                lane
+                            } else {
+                                lane + 4
+                            };
+                            result[lane * 4..lane * 4 + 4]
+                                .copy_from_slice(&a[source_lane * 4..source_lane * 4 + 4]);
+                            result[(lane + 4) * 4..(lane + 4) * 4 + 4]
+                                .copy_from_slice(&b[source_lane * 4..source_lane * 4 + 4]);
                         }
                     }
                     0b111000 | 0b111100 => {
                         for lane in 0..8 {
-                            let source_lane = if shift_operation == 0b111000 { lane } else { lane + 8 };
+                            let source_lane = if shift_operation == 0b111000 {
+                                lane
+                            } else {
+                                lane + 8
+                            };
                             let byte = a[source_lane];
                             let value = (byte as i8 as i16).to_be_bytes();
                             result[lane * 2..lane * 2 + 2].copy_from_slice(&value);
@@ -2299,7 +2364,13 @@ impl PpcInterpreter {
                                 all_false &= !condition;
                             }
                             if instruction & (1 << 6) != 0 {
-                                self.state.cr[6] = if all_true { 0b1000 } else if all_false { 0b0010 } else { 0b0100 };
+                                self.state.cr[6] = if all_true {
+                                    0b1000
+                                } else if all_false {
+                                    0b0010
+                                } else {
+                                    0b0100
+                                };
                             }
                         }
                         _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
@@ -5333,7 +5404,9 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0, 15, 0x80, 0x8F, 1, 14, 0x81, 0x8E, 2, 13, 0x82, 0x8D, 3, 12, 0x83, 0x8C]
+            [
+                0, 15, 0x80, 0x8F, 1, 14, 0x81, 0x8E, 2, 13, 0x82, 0x8D, 3, 12, 0x83, 0x8C
+            ]
         );
     }
 
@@ -5364,17 +5437,27 @@ mod tests {
                 | (((operation >> 3) & 7) << 7)
                 | ((operation & 1) << 4)
         };
-        put_instruction(&mut memory, 0x1000, encode_shift(0x7D, 0x72, 0x43, 0b001101));
-        put_instruction(&mut memory, 0x1004, encode_shift(0x7D, 0x72, 0x43, 0b011101));
-        put_instruction(&mut memory, 0x1008, encode_compare(0x7D, 0x72, 0x43, 0b100000));
+        put_instruction(
+            &mut memory,
+            0x1000,
+            encode_shift(0x7D, 0x72, 0x43, 0b001101),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            encode_shift(0x7D, 0x72, 0x43, 0b011101),
+        );
+        put_instruction(
+            &mut memory,
+            0x1008,
+            encode_compare(0x7D, 0x72, 0x43, 0b100000),
+        );
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x72] = [
             0x80, 0, 0, 1, 0x80, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 4,
         ];
-        cpu.state.vr[0x43] = [
-            0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4,
-        ];
+        cpu.state.vr[0x43] = [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
@@ -5383,12 +5466,16 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0x40, 0, 0, 0, 0x40, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0, 0, 0, 2]
+            [
+                0x40, 0, 0, 0, 0x40, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0, 0, 0, 2
+            ]
         );
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]
+            [
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF
+            ]
         );
     }
 
@@ -5427,18 +5514,20 @@ mod tests {
         }
 
         cpu.state.vr[0x72] = [
-            0x00, 0x7F, 0xFF, 0x80, 0x00, 0x01, 0xFF, 0xFF,
-            0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05,
+            0x00, 0x7F, 0xFF, 0x80, 0x00, 0x01, 0xFF, 0xFF, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04,
+            0x00, 0x05,
         ];
         cpu.state.vr[0x43] = [
-            0x00, 0x80, 0x00, 0x7F, 0x00, 0x02, 0x00, 0x03,
-            0x00, 0x04, 0x00, 0x05, 0x00, 0x06, 0x00, 0x07,
+            0x00, 0x80, 0x00, 0x7F, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05, 0x00, 0x06,
+            0x00, 0x07,
         ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0x7F, 0x80, 0x01, 0xFF, 0x02, 0x03, 0x04, 0x05,
-             0x7F, 0x7F, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]
+            [
+                0x7F, 0x80, 0x01, 0xFF, 0x02, 0x03, 0x04, 0x05, 0x7F, 0x7F, 0x02, 0x03, 0x04, 0x05,
+                0x06, 0x07
+            ]
         );
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
     }
