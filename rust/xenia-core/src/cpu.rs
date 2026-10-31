@@ -2073,6 +2073,45 @@ impl PpcInterpreter {
                 self.state.vr[vd] = result;
                 self.state.pc = next_pc;
             }
+            // Xenon VMX128 three-register logical instructions (primary opcode 5).
+            5 => {
+                let registers = decode_vmx128_register_fields(instruction);
+                let operation = (((instruction >> 6) & 0xF) << 1)
+                    | ((instruction >> 4) & 0x1);
+                let a = self.state.vr[registers.va];
+                let b = self.state.vr[registers.vb];
+                let mut result = [0_u8; 16];
+                match operation {
+                    0b100001 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane] & b[lane];
+                        }
+                    }
+                    0b100101 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane] & !b[lane];
+                        }
+                    }
+                    0b101001 => {
+                        for lane in 0..16 {
+                            result[lane] = !(a[lane] | b[lane]);
+                        }
+                    }
+                    0b101101 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane] | b[lane];
+                        }
+                    }
+                    0b110001 => {
+                        for lane in 0..16 {
+                            result[lane] = a[lane] ^ b[lane];
+                        }
+                    }
+                    _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                }
+                self.state.vr[registers.vd] = result;
+                self.state.pc = next_pc;
+            }
             // Floating-point displacement loads/stores.
             48..=51 => {
                 let update = matches!(opcode, 49 | 51);
@@ -5073,6 +5112,47 @@ mod tests {
             cpu.state.vr[5],
             [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
         );
+    }
+
+    #[test]
+    fn vmx128_logical_instructions_execute_with_extended_register_indices() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let encode_vmx128 = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 0x3) << 2)
+                | (((va >> 5) & 0x1) << 5)
+                | (((va >> 6) & 0x1) << 10)
+                | (((vb >> 5) & 0x3))
+                | (((operation >> 1) & 0xF) << 6)
+                | ((operation & 0x1) << 4)
+        };
+        // vand128 v125,v114,v67
+        put_instruction(&mut memory, 0x1000, encode_vmx128(0x7D, 0x72, 0x43, 0b100001));
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x72] = [
+            0xF0, 0x0F, 0xAA, 0x55, 0xFF, 0x00, 0x81, 0x18, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+            0xDE, 0xF0,
+        ];
+        cpu.state.vr[0x43] = [
+            0x0F, 0xF0, 0x0F, 0xF0, 0x55, 0xAA, 0x18, 0x81, 0xFF, 0x0F, 0xF0, 0xAA, 0x55, 0x33,
+            0xCC, 0x0F,
+        ];
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0x00, 0x00, 0x0A, 0x50, 0x55, 0x00, 0x00, 0x00, 0x12, 0x04, 0x50, 0x28, 0x10, 0x30,
+                0xCC, 0x00,
+            ]
+        );
+        assert_eq!(cpu.state.pc, 0x1004);
     }
 
     #[test]
