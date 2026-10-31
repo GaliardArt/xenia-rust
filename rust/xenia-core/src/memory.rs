@@ -171,6 +171,15 @@ pub trait GuestMemoryAccess {
 
     fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error>;
 
+    /// Writes a contiguous byte range. Implementations backed by ordinary RAM
+    /// should override this with an all-or-nothing bounds check and copy.
+    fn write_bytes(&mut self, address: GuestAddress, data: &[u8]) -> Result<(), Self::Error> {
+        for (offset, byte) in data.iter().copied().enumerate() {
+            self.write_u8(GuestAddress(address.0.wrapping_add(offset as u32)), byte)?;
+        }
+        Ok(())
+    }
+
     fn read_u16_be(&self, address: GuestAddress) -> Result<u16, Self::Error> {
         let high = self.read_u8(address)?;
         let low = self.read_u8(GuestAddress(address.0.wrapping_add(1)))?;
@@ -205,6 +214,10 @@ impl GuestMemoryAccess for GuestMemory {
 
     fn write_u8(&mut self, address: GuestAddress, value: u8) -> Result<(), Self::Error> {
         GuestMemory::write_u8(self, address, value)
+    }
+
+    fn write_bytes(&mut self, address: GuestAddress, data: &[u8]) -> Result<(), Self::Error> {
+        GuestMemory::write_bytes(self, address, data)
     }
 
     fn read_u16_be(&self, address: GuestAddress) -> Result<u16, Self::Error> {
