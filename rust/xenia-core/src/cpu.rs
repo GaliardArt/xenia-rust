@@ -3793,9 +3793,8 @@ impl PpcInterpreter {
                             let sign_extend = |value: u64| ((value << 12) as i64 >> 12) as u32;
                             [
                                 f32::from_bits(
-                                    0x4040_0000_u32.wrapping_add(sign_extend(
-                                        (packed & 0xF_FFFF) as u32,
-                                    )),
+                                    0x4040_0000_u32
+                                        .wrapping_add(sign_extend((packed & 0xF_FFFF) as u32)),
                                 ),
                                 f32::from_bits(
                                     0x4040_0000_u32.wrapping_add(sign_extend(
