@@ -2160,6 +2160,116 @@ impl PpcInterpreter {
             }
             // Initial VMX integer/logic subset (standard 5-bit register forms).
             4 => {
+                // Xenon VMX128 indexed memory forms use a dedicated VX128_1
+                // register layout and an 8-bit selector split around the opcode.
+                let memory_selector = (((instruction >> 4) & 0x7F) << 2) | (instruction & 0x3);
+                if matches!(
+                    memory_selector,
+                    3 | 67 | 131 | 195 | 387 | 451 | 707 | 963 | 1027 | 1091 | 1283
+                        | 1347 | 1539 | 1603 | 1795 | 1859
+                ) {
+                    let vd = (((instruction >> 21) & 0x1F)
+                        | (((instruction >> 24) & 0x3) << 5)) as usize;
+                    let ra = ((instruction >> 16) & 0x1F) as usize;
+                    let rb = ((instruction >> 11) & 0x1F) as usize;
+                    let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                    let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                    let aligned = address & !0xF;
+                    let offset = (address & 0xF) as usize;
+                    let mut vector = self.state.vr[vd];
+
+                    match memory_selector {
+                        3 => {
+                            for lane in 0..16 {
+                                vector[lane] = offset.wrapping_add(lane) as u8;
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        67 => {
+                            for lane in 0..16 {
+                                vector[lane] = (16usize - offset + lane) as u8;
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        131 | 195 | 707 => {
+                            for lane in 0..16 {
+                                vector[lane] = memory
+                                    .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
+                                    .map_err(Into::into)?;
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        1027 | 1539 => {
+                            for lane in 0..16 {
+                                vector[lane] = if lane + offset < 16 {
+                                    memory
+                                        .read_u8(GuestAddress(aligned.wrapping_add((lane + offset) as u32)))
+                                        .map_err(Into::into)?
+                                } else {
+                                    0
+                                };
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        1091 | 1603 => {
+                            vector = [0; 16];
+                            if offset != 0 {
+                                let start = 16 - offset;
+                                for lane in 0..offset {
+                                    vector[start + lane] = memory
+                                        .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
+                                        .map_err(Into::into)?;
+                                }
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        387 => {
+                            let word_address = address & !3;
+                            let lane = ((address & 0xC) >> 2) as usize;
+                            let start = lane * 4;
+                            for byte in 0..4 {
+                                vector[start + byte] = memory
+                                    .read_u8(GuestAddress(word_address.wrapping_add(byte as u32)))
+                                    .map_err(Into::into)?;
+                            }
+                            self.state.vr[vd] = vector;
+                        }
+                        451 | 963 => {
+                            for lane in 0..16 {
+                                memory
+                                    .write_u8(
+                                        GuestAddress(aligned.wrapping_add(lane as u32)),
+                                        vector[lane],
+                                    )
+                                    .map_err(Into::into)?;
+                            }
+                        }
+                        1283 | 1795 => {
+                            for lane in offset..16 {
+                                memory
+                                    .write_u8(
+                                        GuestAddress(aligned.wrapping_add(lane as u32)),
+                                        vector[lane - offset],
+                                    )
+                                    .map_err(Into::into)?;
+                            }
+                        }
+                        1347 | 1859 => {
+                            for lane in 0..offset {
+                                memory
+                                    .write_u8(
+                                        GuestAddress(aligned.wrapping_add(lane as u32)),
+                                        vector[16 - offset + lane],
+                                    )
+                                    .map_err(Into::into)?;
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
                 let vd = ((instruction >> 21) & 0x1F) as usize;
                 let va = ((instruction >> 16) & 0x1F) as usize;
                 let vb = ((instruction >> 11) & 0x1F) as usize;
@@ -3106,6 +3216,87 @@ impl PpcInterpreter {
                         self.state.vr[registers.vd] = shifted;
                         self.state.pc = next_pc;
                         return Ok(());
+                    }
+                    // Saturating partial sums across byte, halfword and word lanes.
+                    1544 | 1608 | 1672 | 1800 | 1928 => {
+                        let mut saturated = false;
+                        let mut words = [0_u32; 4];
+                        match xo {
+                            1544 | 1800 => {
+                                for lane in 0..4 {
+                                    let offset = lane * 4;
+                                    let mut sum = 0_i64;
+                                    for item in 0..4 {
+                                        let value = a[offset + item];
+                                        sum += if xo == 1544 { value as i64 } else { value as i8 as i64 };
+                                    }
+                                    let accumulator = u32::from_be_bytes(
+                                        b[offset..offset + 4].try_into().unwrap(),
+                                    );
+                                    let exact = if xo == 1544 {
+                                        sum + accumulator as i64
+                                    } else {
+                                        sum + accumulator as i32 as i64
+                                    };
+                                    let (min, max) = if xo == 1544 {
+                                        (0_i64, u32::MAX as i64)
+                                    } else {
+                                        (i32::MIN as i64, i32::MAX as i64)
+                                    };
+                                    saturated |= exact < min || exact > max;
+                                    words[lane] = exact.clamp(min, max) as u32;
+                                }
+                            }
+                            1608 => {
+                                for lane in 0..4 {
+                                    let offset = lane * 4;
+                                    let first = i16::from_be_bytes([a[offset], a[offset + 1]]) as i64;
+                                    let second = i16::from_be_bytes([a[offset + 2], a[offset + 3]]) as i64;
+                                    let accumulator = u32::from_be_bytes(
+                                        b[offset..offset + 4].try_into().unwrap(),
+                                    ) as i32 as i64;
+                                    let exact = first + second + accumulator;
+                                    saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
+                                    words[lane] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                                }
+                            }
+                            1672 => {
+                                for (lane, pair) in [(1usize, 0usize), (3, 2)] {
+                                    let first = u32::from_be_bytes(
+                                        a[pair * 4..pair * 4 + 4].try_into().unwrap(),
+                                    ) as i32 as i64;
+                                    let second = u32::from_be_bytes(
+                                        a[(pair + 1) * 4..(pair + 1) * 4 + 4].try_into().unwrap(),
+                                    ) as i32 as i64;
+                                    let accumulator = u32::from_be_bytes(
+                                        b[lane * 4..lane * 4 + 4].try_into().unwrap(),
+                                    ) as i32 as i64;
+                                    let exact = first + second + accumulator;
+                                    saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
+                                    words[lane] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                                }
+                            }
+                            1928 => {
+                                let mut sum = 0_i64;
+                                for lane in 0..4 {
+                                    sum += u32::from_be_bytes(
+                                        a[lane * 4..lane * 4 + 4].try_into().unwrap(),
+                                    ) as i32 as i64;
+                                }
+                                let accumulator = u32::from_be_bytes(b[12..16].try_into().unwrap()) as i32 as i64;
+                                let exact = sum + accumulator;
+                                saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
+                                words[3] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                            }
+                            _ => unreachable!(),
+                        }
+                        for lane in 0..4 {
+                            result[lane * 4..lane * 4 + 4]
+                                .copy_from_slice(&words[lane].to_be_bytes());
+                        }
+                        if saturated {
+                            self.state.vscr |= 1 << 31;
+                        }
                     }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
