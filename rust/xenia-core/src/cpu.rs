@@ -2288,17 +2288,6 @@ impl PpcInterpreter {
                             }
                             self.state.vr[vd] = vector;
                         }
-                        387 => {
-                            let word_address = address & !3;
-                            let lane = ((address & 0xC) >> 2) as usize;
-                            let start = lane * 4;
-                            for byte in 0..4 {
-                                vector[start + byte] = memory
-                                    .read_u8(GuestAddress(word_address.wrapping_add(byte as u32)))
-                                    .map_err(Into::into)?;
-                            }
-                            self.state.vr[vd] = vector;
-                        }
                         451 | 963 => {
                             memory
                                 .write_bytes(GuestAddress(aligned), &vector)
