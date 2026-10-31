@@ -9127,6 +9127,44 @@ mod tests {
     }
 
     #[test]
+    fn classic_and_vmx128_partial_right_loads_require_full_aligned_block() {
+        let mut classic_memory = GuestMemory::new(GuestAddress(0x2000), 0x22);
+        let classic_instruction =
+            (31 << 26) | (1 << 21) | (3 << 16) | (4 << 11) | (551 << 1);
+        put_instruction(&mut classic_memory, 0x2000, classic_instruction);
+        let mut classic_cpu = fp_enabled_cpu();
+        classic_cpu.state.pc = 0x2000;
+        classic_cpu.state.gpr[3] = 0x2020;
+        classic_cpu.state.gpr[4] = 1;
+        classic_cpu.state.vr[1] = [0xAA; 16];
+
+        assert!(classic_cpu.step(&mut classic_memory).is_err());
+        assert_eq!(classic_cpu.state.vr[1], [0xAA; 16]);
+        assert_eq!(classic_cpu.state.pc, 0x2000);
+
+        let mut vmx128_memory = GuestMemory::new(GuestAddress(0x2000), 0x22);
+        let vd = 0x41_u32;
+        let selector = 1091_u32;
+        let vmx128_instruction = (4 << 26)
+            | ((vd & 0x1F) << 21)
+            | (1 << 16)
+            | (2 << 11)
+            | (((selector >> 4) & 0x7F) << 4)
+            | (selector & 3)
+            | (((vd >> 5) & 3) << 2);
+        put_instruction(&mut vmx128_memory, 0x2000, vmx128_instruction);
+        let mut vmx128_cpu = fp_enabled_cpu();
+        vmx128_cpu.state.pc = 0x2000;
+        vmx128_cpu.state.gpr[1] = 0x2020;
+        vmx128_cpu.state.gpr[2] = 1;
+        vmx128_cpu.state.vr[vd as usize] = [0xBB; 16];
+
+        assert!(vmx128_cpu.step(&mut vmx128_memory).is_err());
+        assert_eq!(vmx128_cpu.state.vr[vd as usize], [0xBB; 16]);
+        assert_eq!(vmx128_cpu.state.pc, 0x2000);
+    }
+
+    #[test]
     fn classic_altivec_partial_vector_loads_and_stores_execute() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x2000);
         for offset in 0..16 {
