@@ -2128,7 +2128,13 @@ impl PpcInterpreter {
                         }
                     }
                     12 | 76 | 140 | 268 | 332 | 396 => {
-                        let width = if matches!(xo, 12 | 268) { 1 } else if matches!(xo, 76 | 332) { 2 } else { 4 };
+                        let width = if matches!(xo, 12 | 268) {
+                            1
+                        } else if matches!(xo, 76 | 332) {
+                            2
+                        } else {
+                            4
+                        };
                         let high = matches!(xo, 12 | 76 | 140);
                         let half = 8 / width;
                         let first = if high { 0 } else { half };
@@ -2151,7 +2157,11 @@ impl PpcInterpreter {
                     452 | 708 => {
                         let shift = (b[15] & 7) as u32;
                         let value = u128::from_be_bytes(a);
-                        let shifted = if xo == 452 { value.wrapping_shl(shift) } else { value.wrapping_shr(shift) };
+                        let shifted = if xo == 452 {
+                            value.wrapping_shl(shift)
+                        } else {
+                            value.wrapping_shr(shift)
+                        };
                         result.copy_from_slice(&shifted.to_be_bytes());
                     }
                     1540 => {
