@@ -5328,7 +5328,7 @@ mod tests {
         let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
-        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP;
+        cpu.state.msr = PPC_MSR_FE1;
         cpu.pending_exception = Some(PpcException::FloatingPoint {
             instruction_pc: 0x0FFC,
             causes: (1 << 26) | (1 << 25),
