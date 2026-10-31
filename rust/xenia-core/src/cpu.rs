@@ -2104,8 +2104,7 @@ impl PpcInterpreter {
                 }
 
                 match operation {
-                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101
-                    | 0b011001 | 0b011101 => {
+                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 => {
                         // Four IEEE-754 binary32 lanes. Fused multiply-add variants
                         // use the destination as the third source, as specified by VX128.
                         let destination = self.state.vr[registers.vd];
