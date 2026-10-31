@@ -2076,7 +2076,7 @@ impl PpcInterpreter {
             // Xenon VMX128 three-register logical instructions (primary opcode 5).
             5 => {
                 let registers = decode_vmx128_register_fields(instruction);
-                let operation = (((instruction >> 6) & 0xF) << 1) | ((instruction >> 4) & 0x1);
+                let operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 0x1);
                 let a = self.state.vr[registers.va];
                 let b = self.state.vr[registers.vb];
                 let mut result = [0_u8; 16];
@@ -5125,7 +5125,7 @@ mod tests {
                 | (((va >> 5) & 0x1) << 5)
                 | (((va >> 6) & 0x1) << 10)
                 | ((vb >> 5) & 0x3)
-                | (((operation >> 1) & 0xF) << 6)
+                | (((operation >> 2) & 0xF) << 6)
                 | ((operation & 0x1) << 4)
         };
         let operations = [0b100001, 0b100101, 0b101001, 0b101101, 0b110001];
