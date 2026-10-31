@@ -3202,7 +3202,7 @@ impl PpcInterpreter {
                                 let pixel = u32::from_be_bytes(
                                     source[offset..offset + 4].try_into().unwrap(),
                                 );
-                                let alpha = (pixel >> 31) & 1;
+                                let alpha = u32::from(pixel >> 24 != 0);
                                 let red = (pixel >> 19) & 0x1F;
                                 let green = (pixel >> 11) & 0x1F;
                                 let blue = (pixel >> 3) & 0x1F;
