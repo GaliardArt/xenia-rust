@@ -5276,7 +5276,7 @@ mod tests {
             0x1000,
             (31 << 26) | (3 << 21) | (1 << 16) | (146 << 1),
         );
-        let mut cpu = fp_enabled_cpu();
+        let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
 
@@ -5325,7 +5325,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtmsr r3
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
-        let mut cpu = fp_enabled_cpu();
+        let mut cpu = PpcInterpreter::default();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
         cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP;
