@@ -2021,7 +2021,7 @@ impl PpcInterpreter {
                             }
                         }
                         44 => {
-                            let shift = (vc & 0xF) as usize;
+                            let shift = vc & 0xF;
                             let mut joined = [0_u8; 32];
                             joined[..16].copy_from_slice(&a);
                             joined[16..].copy_from_slice(&b);
