@@ -8940,14 +8940,106 @@ mod tests {
         assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
     }
     #[test]
-    fn vmx128_d3d_half_pack_unpack_and_rotate_insert_execute() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
-        let encode_pack = |vd: u32, vb: u32, immediate: u32| {
+    fn vmx128_d3d_pack_modes_place_packed_words_by_selector() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
+        let encode_pack = |immediate: u32, shift: u32| {
+            let vd = 0x46_u32;
+            let vb = 0x25_u32;
             (6 << 26)
                 | ((vd & 0x1F) << 21)
                 | ((immediate & 0x1F) << 16)
                 | ((vb & 0x1F) << 11)
                 | (6 << 8)
+                | (shift << 6)
+                | (1 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        let cases = [
+            (20, 0, [0xAA; 16]),
+            (
+                21,
+                3,
+                [
+                    0x38, 0x00, 0x44, 0x00, 0xAA, 0xAA, 0xAA, 0xAA,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                ],
+            ),
+            (
+                22,
+                0,
+                [
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
+                ],
+            ),
+            (
+                22,
+                1,
+                [
+                    0xAA, 0xAA, 0xAA, 0xAA, 0x3C, 0x00, 0xC0, 0x00,
+                    0x38, 0x00, 0x44, 0x00, 0xAA, 0xAA, 0xAA, 0xAA,
+                ],
+            ),
+            (
+                22,
+                2,
+                [
+                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                ],
+            ),
+            (
+                22,
+                3,
+                [
+                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                ],
+            ),
+            (
+                23,
+                3,
+                [
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0x3C, 0x00, 0xC0, 0x00,
+                ],
+            ),
+        ];
+        for (index, (immediate, shift, _)) in cases.iter().enumerate() {
+            put_instruction(
+                &mut memory,
+                0x1000 + index as u32 * 4,
+                encode_pack(*immediate, *shift),
+            );
+        }
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x25] = [
+            0x3F, 0x80, 0, 0, 0xC0, 0, 0, 0, 0x3F, 0, 0, 0, 0x40, 0x80, 0, 0,
+        ];
+        for (immediate, shift, expected) in cases {
+            cpu.state.vr[0x46] = [0xAA; 16];
+            cpu.step(&mut memory).unwrap();
+            assert_eq!(
+                cpu.state.vr[0x46],
+                expected,
+                "pack immediate {immediate}, shift {shift}"
+            );
+        }
+    }
+
+    #[test]
+    fn vmx128_d3d_half_pack_unpack_and_rotate_insert_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_pack = |vd: u32, vb: u32, immediate: u32, shift: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (6 << 8)
+                | (shift << 6)
                 | (1 << 4)
                 | (((vd >> 5) & 3) << 2)
                 | ((vb >> 5) & 3)
@@ -8961,7 +9053,7 @@ mod tests {
                 | (((vd >> 5) & 3) << 2)
                 | ((vb >> 5) & 3)
         };
-        put_instruction(&mut memory, 0x1000, encode_pack(0x46, 0x25, 20)); // vpkd3d128 FLOAT16_4
+        put_instruction(&mut memory, 0x1000, encode_pack(0x46, 0x25, 22, 2)); // vpkd3d128 FLOAT16_4
         put_instruction(&mut memory, 0x1004, encode_unpack(0x47, 0x46, 20)); // vupkd3d128 FLOAT16_4
 
         let mut cpu = fp_enabled_cpu();
@@ -9007,6 +9099,15 @@ mod tests {
             [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3]
         );
     }
+    #[test]
+    fn binary16_pack_conversion_rounds_toward_zero() {
+        assert_eq!(f32_to_f16_bits_toward_zero(1.0007), 0x3C00);
+        assert_eq!(f32_to_f16_bits_toward_zero(-1.0007), 0xBC00);
+        assert_eq!(f32_to_f16_bits_toward_zero(65_520.0), 0x7BFF);
+        assert_eq!(f32_to_f16_bits_toward_zero(f32::from_bits(0x3380_0000)), 0x0001);
+        assert_eq!(f32_to_f16_bits_toward_zero(f32::from_bits(0x3300_0000)), 0x0000);
+    }
+
     #[test]
     fn binary16_conversion_helpers_cover_normal_subnormal_and_special_values() {
         assert_eq!(f32_to_f16_bits(1.0), 0x3C00);
