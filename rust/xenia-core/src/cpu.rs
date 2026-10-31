@@ -2469,6 +2469,71 @@ impl PpcInterpreter {
                             }
                         }
                     }
+                    // Classic AltiVec pack operations, preserving source order A then B.
+                    14 | 78 | 142 | 206 | 270 | 334 | 398 | 462 => {
+                        let word_input = matches!(xo, 78 | 206 | 334 | 462);
+                        let signed_input = matches!(xo, 270 | 334 | 398 | 462);
+                        let saturating = !matches!(xo, 14 | 78);
+                        let signed_output = matches!(xo, 398 | 462);
+                        let input_width = if word_input { 4 } else { 2 };
+                        let output_width = input_width / 2;
+                        let mut saturated = false;
+                        let mut output = 0;
+                        for source in [a, b] {
+                            for lane in 0..(16 / input_width) {
+                                let offset = lane * input_width;
+                                let raw = if word_input {
+                                    u32::from_be_bytes(source[offset..offset + 4].try_into().unwrap()) as u64
+                                } else {
+                                    u16::from_be_bytes([source[offset], source[offset + 1]]) as u64
+                                };
+                                let value = if signed_input {
+                                    if word_input { raw as u32 as i32 as i64 } else { raw as u16 as i16 as i64 }
+                                } else {
+                                    raw as i64
+                                };
+                                let (packed, did_saturate) = if saturating && signed_output {
+                                    let min = -(1_i64 << (output_width * 8 - 1));
+                                    let max = (1_i64 << (output_width * 8 - 1)) - 1;
+                                    (value.clamp(min, max) as u64, value < min || value > max)
+                                } else if saturating {
+                                    let max = (1_i64 << (output_width * 8)) - 1;
+                                    (value.clamp(0, max) as u64, value < 0 || value > max)
+                                } else {
+                                    (raw & ((1_u64 << (output_width * 8)) - 1), false)
+                                };
+                                saturated |= did_saturate;
+                                if output_width == 1 {
+                                    result[output] = packed as u8;
+                                } else {
+                                    result[output..output + 2].copy_from_slice(&(packed as u16).to_be_bytes());
+                                }
+                                output += output_width;
+                            }
+                        }
+                        if saturated {
+                            self.state.vscr |= 1 << 31;
+                        }
+                    }
+                    // Signed byte/halfword unpack operations.
+                    526 | 590 | 654 | 718 => {
+                        let high = matches!(xo, 526 | 590);
+                        let halfword = matches!(xo, 590 | 718);
+                        if halfword {
+                            for lane in 0..4 {
+                                let source_lane = if high { lane } else { lane + 4 };
+                                let offset = source_lane * 2;
+                                let value = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
+                                result[lane * 4..lane * 4 + 4].copy_from_slice(&value.to_be_bytes());
+                            }
+                        } else {
+                            for lane in 0..8 {
+                                let source_lane = if high { lane } else { lane + 8 };
+                                let value = (b[source_lane] as i8 as i16).to_be_bytes();
+                                result[lane * 2..lane * 2 + 2].copy_from_slice(&value);
+                            }
+                        }
+                    }
                     // AltiVec compares: the record form summarizes all lanes in CR6.
                     6 | 70 | 134 | 198 | 454 | 518 | 582 | 646 | 710 | 774 | 838 | 902 | 966 => {
                         let width = if matches!(xo, 6 | 518 | 774) {
