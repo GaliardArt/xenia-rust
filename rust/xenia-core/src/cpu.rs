@@ -3499,12 +3499,10 @@ impl PpcInterpreter {
                             source[offset..offset + 4].try_into().unwrap(),
                         ))
                     });
-                    let unorm = |value: f32, max: u32| {
-                        (value.clamp(0.0, 1.0) * max as f32).round() as u32
-                    };
-                    let snorm = |value: f32| {
-                        (value.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
-                    };
+                    let unorm =
+                        |value: f32, max: u32| (value.clamp(0.0, 1.0) * max as f32).round() as u32;
+                    let snorm =
+                        |value: f32| (value.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
                     let mut packed = [0_u8; 16];
                     let packed_len = match pack_type {
                         0 => {
