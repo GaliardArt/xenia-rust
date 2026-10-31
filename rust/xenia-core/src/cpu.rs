@@ -2038,11 +2038,9 @@ impl PpcInterpreter {
                         };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         let mut vector = [0_u8; 16];
-                        for (index, byte) in vector.iter_mut().enumerate() {
-                            *byte = memory
-                                .read_u8(GuestAddress(address.wrapping_add(index as u32)))
-                                .map_err(Into::into)?;
-                        }
+                        memory
+                            .read_bytes(GuestAddress(address), &mut vector)
+                            .map_err(Into::into)?;
                         self.state.vr[rt_rs] = vector;
                     }
                     487 => {
@@ -2365,11 +2363,9 @@ impl PpcInterpreter {
                             self.state.vr[vd] = vector;
                         }
                         131 | 195 | 707 => {
-                            for (lane, byte) in vector.iter_mut().enumerate() {
-                                *byte = memory
-                                    .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
-                                    .map_err(Into::into)?;
-                            }
+                            memory
+                                .read_bytes(GuestAddress(aligned), &mut vector)
+                                .map_err(Into::into)?;
                             self.state.vr[vd] = vector;
                         }
                         387 => {
