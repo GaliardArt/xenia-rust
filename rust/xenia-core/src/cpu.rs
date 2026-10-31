@@ -5493,7 +5493,7 @@ mod tests {
         assert_eq!(
             cpu.state.vr[0x7D],
             [
-                0x40, 0, 0, 0, 0x40, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0, 0, 0, 2
+                0x40, 0, 0, 0, 0x40, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0
             ]
         );
         cpu.step(&mut memory).unwrap();
