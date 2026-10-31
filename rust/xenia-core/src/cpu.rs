@@ -2935,6 +2935,7 @@ impl PpcInterpreter {
                                 _ => unreachable!(),
                             };
                             let value = flush_vscr_nj_denormal(value, self.state.vscr);
+                            let value = flush_vscr_nj_denormal(value, self.state.vscr);
                             result[offset..offset + 4]
                                 .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
@@ -3567,15 +3568,24 @@ impl PpcInterpreter {
                         let destination = self.state.vr[registers.vd];
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av = f32::from_bits(u32::from_be_bytes(
-                                a[offset..offset + 4].try_into().unwrap(),
-                            ));
-                            let bv = f32::from_bits(u32::from_be_bytes(
-                                b[offset..offset + 4].try_into().unwrap(),
-                            ));
-                            let dv = f32::from_bits(u32::from_be_bytes(
-                                destination[offset..offset + 4].try_into().unwrap(),
-                            ));
+                            let av = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    a[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
+                            let bv = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    b[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
+                            let dv = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    destination[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
                             let value = match operation {
                                 0b000001 => av + bv,
                                 0b000101 => av - bv,
@@ -3593,14 +3603,21 @@ impl PpcInterpreter {
                         let mut sum = 0.0_f32;
                         for lane in 0..lane_count {
                             let offset = lane * 4;
-                            let av = f32::from_bits(u32::from_be_bytes(
-                                a[offset..offset + 4].try_into().unwrap(),
-                            ));
-                            let bv = f32::from_bits(u32::from_be_bytes(
-                                b[offset..offset + 4].try_into().unwrap(),
-                            ));
+                            let av = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    a[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
+                            let bv = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    b[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
                             sum = av.mul_add(bv, sum);
                         }
+                        let sum = flush_vscr_nj_denormal(sum, self.state.vscr);
                         for lane in 0..4 {
                             let offset = lane * 4;
                             result[offset..offset + 4]
@@ -3857,7 +3874,10 @@ impl PpcInterpreter {
                         for lane in 0..4 {
                             let offset = lane * 4;
                             let raw = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
-                            let float = f32::from_bits(raw);
+                            let float = flush_vscr_nj_denormal(
+                                f32::from_bits(raw),
+                                self.state.vscr,
+                            );
                             let value = match unary_operation {
                                 0b0100011 => {
                                     let scaled = float * 2.0_f32.powi(immediate as i32);
