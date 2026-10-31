@@ -8957,57 +8957,16 @@ mod tests {
                 | ((vb >> 5) & 3)
         };
         let cases = [
-            (20, 0, [0xAA; 16]),
-            (
-                21,
-                3,
-                [
-                    0x38, 0x00, 0x44, 0x00, 0xAA, 0xAA, 0xAA, 0xAA,
-                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-                ],
-            ),
-            (
-                22,
-                0,
-                [
-                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
-                ],
-            ),
-            (
-                22,
-                1,
-                [
-                    0xAA, 0xAA, 0xAA, 0xAA, 0x3C, 0x00, 0xC0, 0x00,
-                    0x38, 0x00, 0x44, 0x00, 0xAA, 0xAA, 0xAA, 0xAA,
-                ],
-            ),
-            (
-                22,
-                2,
-                [
-                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
-                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-                ],
-            ),
-            (
-                22,
-                3,
-                [
-                    0x3C, 0x00, 0xC0, 0x00, 0x38, 0x00, 0x44, 0x00,
-                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-                ],
-            ),
-            (
-                23,
-                3,
-                [
-                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
-                    0xAA, 0xAA, 0xAA, 0xAA, 0x3C, 0x00, 0xC0, 0x00,
-                ],
-            ),
+            (20, 0, 0, 0, 0),
+            (21, 3, 0, 4, 4),
+            (22, 0, 8, 0, 8),
+            (22, 1, 4, 0, 8),
+            (22, 2, 0, 0, 8),
+            (22, 3, 0, 0, 8),
+            (23, 3, 12, 0, 4),
         ];
-        for (index, (immediate, shift, _)) in cases.iter().enumerate() {
+        let packed = [0x3C, 0, 0xC0, 0, 0x38, 0, 0x44, 0];
+        for (index, (immediate, shift, _, _, _)) in cases.iter().enumerate() {
             put_instruction(
                 &mut memory,
                 0x1000 + index as u32 * 4,
@@ -9020,14 +8979,13 @@ mod tests {
         cpu.state.vr[0x25] = [
             0x3F, 0x80, 0, 0, 0xC0, 0, 0, 0, 0x3F, 0, 0, 0, 0x40, 0x80, 0, 0,
         ];
-        for (immediate, shift, expected) in cases {
+        for (immediate, shift, destination_offset, source_offset, count) in cases {
+            let mut expected = [0xAA; 16];
+            expected[destination_offset..destination_offset + count]
+                .copy_from_slice(&packed[source_offset..source_offset + count]);
             cpu.state.vr[0x46] = [0xAA; 16];
             cpu.step(&mut memory).unwrap();
-            assert_eq!(
-                cpu.state.vr[0x46],
-                expected,
-                "pack immediate {immediate}, shift {shift}"
-            );
+            assert_eq!(cpu.state.vr[0x46], expected, "pack immediate {immediate}, shift {shift}");
         }
     }
 
