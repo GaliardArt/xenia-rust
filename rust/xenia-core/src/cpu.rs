@@ -5481,13 +5481,13 @@ mod tests {
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x72] = [
-            0x80, 0, 0, 1, 0x80, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 4,
+            0x80, 0, 0, 1, 0x80, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 1,
         ];
-        cpu.state.vr[0x43] = [0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4];
+        cpu.state.vr[0x43] = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0, 0, 0, 2, 0, 0, 0, 4, 0xFF, 0xFF, 0xFF, 0xFE, 0, 0, 0, 8]
+            [0, 0, 0, 2, 0, 0, 0, 4, 0xFF, 0xFF, 0xFF, 0xFE, 0, 0, 0, 2]
         );
         cpu.step(&mut memory).unwrap();
         assert_eq!(
