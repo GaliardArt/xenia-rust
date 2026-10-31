@@ -12,8 +12,9 @@ pub mod xex;
 
 pub use address_space::{AddressSpaceError, GuestAddressSpace, MemoryPermissions};
 pub use cpu::{
-    PPC_MSR_FE0, PPC_MSR_FE1, PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION,
-    PPC_SRR1_IMPRECISE, PpcError, PpcException, PpcFpExceptionMode, PpcInterpreter, PpcState,
+    PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1, PPC_MSR_FP,
+    PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE, PpcError,
+    PpcException, PpcFpExceptionMode, PpcInterpreter, PpcState,
 };
 pub use layout::{ImageLayout, LayoutError, LoadedSection, plan_image_layout};
 pub use loader::{

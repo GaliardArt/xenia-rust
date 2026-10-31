@@ -11,8 +11,12 @@ use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 /// PowerPC MSR floating-point exception mode bits in Xenon's 64-bit MSR.
 pub const PPC_MSR_FE0: u64 = 1 << 11;
 pub const PPC_MSR_FE1: u64 = 1 << 8;
+/// MSR[FP], which enables execution of scalar floating-point instructions.
+pub const PPC_MSR_FP: u64 = 1 << 50;
 /// Effective address of the Xenon Program Exception vector.
 pub const PPC_PROGRAM_EXCEPTION_VECTOR: u32 = 0x700;
+/// Effective address of the Xenon Floating-Point Unavailable vector.
+pub const PPC_FP_UNAVAILABLE_VECTOR: u32 = 0x800;
 /// SRR1 bit 43: the program exception was a floating-point enabled exception.
 pub const PPC_SRR1_FP_ENABLED_EXCEPTION: u64 = 1 << 20;
 /// SRR1 bit 47: SRR0 identifies a subsequent instruction, not the faulting one.
@@ -119,6 +123,10 @@ pub enum PpcFpExceptionMode {
 /// in imprecise modes it is not necessarily the architecturally saved SRR0.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PpcException {
+    /// An FP instruction was attempted while MSR[FP] was clear.
+    FloatingPointUnavailable {
+        instruction_pc: u32,
+    },
     FloatingPoint {
         instruction_pc: u32,
         causes: u32,
@@ -180,9 +188,25 @@ impl PpcInterpreter {
         const PROGRAM_ENTRY_MSR_BITS: u64 = 0x9000_0000_0000_0000;
 
         let exception = self.pending_exception.take()?;
-        let (saved_pc, subsequent_instruction) = match exception {
-            PpcException::FloatingPoint { instruction_pc, .. } => (instruction_pc as u64, false),
-            PpcException::FloatingPointEnableTransition { next_pc, .. } => (next_pc as u64, true),
+        let (saved_pc, subsequent_instruction, fp_enabled_exception, vector) = match exception {
+            PpcException::FloatingPointUnavailable { instruction_pc } => (
+                instruction_pc as u64,
+                false,
+                false,
+                PPC_FP_UNAVAILABLE_VECTOR,
+            ),
+            PpcException::FloatingPoint { instruction_pc, .. } => (
+                instruction_pc as u64,
+                false,
+                true,
+                PPC_PROGRAM_EXCEPTION_VECTOR,
+            ),
+            PpcException::FloatingPointEnableTransition { next_pc, .. } => (
+                next_pc as u64,
+                true,
+                true,
+                PPC_PROGRAM_EXCEPTION_VECTOR,
+            ),
         };
 
         self.state.srr0 = saved_pc;
@@ -191,10 +215,15 @@ impl PpcInterpreter {
         } else {
             0
         };
+        let fp_enabled_status = if fp_enabled_exception {
+            PPC_SRR1_FP_ENABLED_EXCEPTION
+        } else {
+            0
+        };
         self.state.srr1 =
-            (self.state.msr & SRR1_MSR_MASK) | PPC_SRR1_FP_ENABLED_EXCEPTION | exception_status;
+            (self.state.msr & SRR1_MSR_MASK) | fp_enabled_status | exception_status;
         self.state.msr = (self.state.msr & PROGRAM_ENTRY_MSR_MASK) | PROGRAM_ENTRY_MSR_BITS;
-        self.state.pc = PPC_PROGRAM_EXCEPTION_VECTOR;
+        self.state.pc = vector;
 
         Some(exception)
     }
@@ -1111,6 +1140,14 @@ impl PpcInterpreter {
         }
     }
 
+    fn is_fpu_instruction(opcode: u32, instruction: u32) -> bool {
+        match opcode {
+            48..=55 | 59 | 63 => true,
+            31 => matches!((instruction >> 1) & 0x3FF, 855 | 887 | 983),
+            _ => false,
+        }
+    }
+
     /// Fetches and executes one big-endian 32-bit instruction.
     pub fn step<M>(&mut self, memory: &mut M) -> Result<(), PpcError>
     where
@@ -1129,14 +1166,21 @@ impl PpcInterpreter {
         {
             return Err(PpcError::PendingException(exception));
         }
-        if let Some(exception @ PpcException::FloatingPointEnableTransition { .. }) =
-            self.pending_exception
+        if let Some(
+            exception @ (PpcException::FloatingPointUnavailable { .. }
+            | PpcException::FloatingPointEnableTransition { .. }),
+        ) = self.pending_exception
         {
             return Err(PpcError::PendingException(exception));
         }
         let pc = self.state.pc;
         let instruction = memory.fetch_u32_be(GuestAddress(pc)).map_err(Into::into)?;
         let opcode = instruction >> 26;
+        if Self::is_fpu_instruction(opcode, instruction) && self.state.msr & PPC_MSR_FP == 0 {
+            let exception = PpcException::FloatingPointUnavailable { instruction_pc: pc };
+            self.pending_exception = Some(exception);
+            return Err(PpcError::PendingException(exception));
+        }
         let rt_rs = ((instruction >> 21) & 0x1F) as usize;
         let ra = ((instruction >> 16) & 0x1F) as usize;
         let immediate = instruction as u16 as i16 as i64;
@@ -2825,9 +2869,17 @@ impl PpcInterpreter {
 #[cfg(test)]
 mod tests {
     use super::{
-        PPC_MSR_FE0, PPC_MSR_FE1, PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION,
-        PPC_SRR1_IMPRECISE, PpcError, PpcException, PpcFpExceptionMode, PpcInterpreter,
+        PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1, PPC_MSR_FP,
+        PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE, PpcError,
+        PpcException, PpcFpExceptionMode, PpcInterpreter,
     };
+
+    fn fp_enabled_cpu() -> PpcInterpreter {
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.msr |= PPC_MSR_FP;
+        cpu
+    }
+
     use crate::address_space::{GuestAddressSpace, MemoryPermissions};
     use crate::memory::{GuestAddress, GuestMemory, MemoryError};
 
@@ -2840,7 +2892,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // addi r3, r0, -1
         put_instruction(&mut memory, 0x1000, (14 << 26) | (3 << 21) | 0xFFFF);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         cpu.step(&mut memory).unwrap();
@@ -2857,7 +2909,7 @@ mod tests {
             0x1000,
             (24 << 26) | (4 << 21) | (5 << 16) | 0x00FF,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[4] = 0x1200;
 
@@ -2880,7 +2932,7 @@ mod tests {
         memory.write_u8(GuestAddress(0x1016), 0xFF).unwrap();
         memory.write_u8(GuestAddress(0x1017), 0x80).unwrap();
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[4] = 0x1014;
 
@@ -2902,7 +2954,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // b +8, LK=1
         put_instruction(&mut memory, 0x1000, (18 << 26) | (2 << 2) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         cpu.step(&mut memory).unwrap();
@@ -2922,7 +2974,7 @@ mod tests {
             0x1004,
             (16 << 26) | (12 << 21) | (2 << 16) | (2 << 2),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 7;
 
@@ -2938,7 +2990,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // bdnz +8 (BO=16, BI ignored)
         put_instruction(&mut memory, 0x1000, (16 << 26) | (16 << 21) | (2 << 2));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.ctr = 2;
 
@@ -2957,7 +3009,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         // bclrl with BO=20 (ignore CR and CTR), XO=16.
         put_instruction(&mut memory, 0x1000, (19 << 26) | (20 << 21) | (16 << 1) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.lr = 0x1237;
 
@@ -2982,7 +3034,7 @@ mod tests {
             0x1004,
             (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (40 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 7;
         cpu.state.gpr[4] = 12;
@@ -3009,7 +3061,7 @@ mod tests {
             0x1004,
             (31 << 26) | (6 << 21) | (3 << 16) | (4 << 11) | (8 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = u64::MAX;
         cpu.state.gpr[4] = 1;
@@ -3034,7 +3086,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode(7, 3, 4, 9)); // mulhdu
         put_instruction(&mut memory, 0x100C, encode(8, 3, 4, 73)); // mulhd
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = u32::MAX as u64;
         cpu.state.gpr[4] = u32::MAX as u64;
@@ -3071,7 +3123,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode(7, 459));
         put_instruction(&mut memory, 0x100C, encode(8, 491));
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1_0000_0000;
         cpu.state.gpr[4] = 2;
@@ -3121,7 +3173,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode(7, 3, 232)); // subfme r7,r3
         put_instruction(&mut memory, 0x100C, encode(8, 3, 200)); // subfze r8,r3
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 5;
         cpu.state.xer = 1 << 29; // CA=1
@@ -3155,7 +3207,7 @@ mod tests {
         put_instruction(&mut memory, 0x1004, encode_spr(6, 8, 467));
         put_instruction(&mut memory, 0x1008, encode_spr(7, 1, 339));
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.lr = 0x1234_5678_9ABC_DEF0;
         cpu.state.gpr[6] = 0xFEDC_BA98_7654_3210;
@@ -3175,7 +3227,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // crand bt=0, ba=0, bb=0
         put_instruction(&mut memory, 0x1000, (19 << 26) | (257 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.cr[0] = 0b1000;
         cpu.step(&mut memory).unwrap();
@@ -3195,7 +3247,7 @@ mod tests {
         memory.write_u8(GuestAddress(0x1014), 0xAB).unwrap();
         memory.write_u16_be(GuestAddress(0x1018), 0x1234).unwrap();
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1010;
         cpu.state.gpr[4] = 4;
@@ -3223,7 +3275,7 @@ mod tests {
             0x1000,
             (31 << 26) | (3 << 21) | (3 << 16) | (4 << 11) | (311 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         assert_eq!(
             cpu.step(&mut memory),
@@ -3243,7 +3295,7 @@ mod tests {
         memory
             .write_u32_be(GuestAddress(0x1014), 0x1234_5678)
             .unwrap();
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1010;
         cpu.state.gpr[6] = 0xCAFE_BABE;
@@ -3290,7 +3342,7 @@ mod tests {
             (31 << 26) | (11 << 21) | (12 << 16) | (26 << 1),
         );
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1234_5678;
         cpu.state.gpr[4] = 0xA5A5_A5A5;
@@ -3329,7 +3381,7 @@ mod tests {
                 )
                 .unwrap();
         }
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1020;
 
@@ -3352,7 +3404,7 @@ mod tests {
         memory
             .write_u32_be(GuestAddress(0x1004), 0x1111_1111)
             .unwrap();
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1004;
         cpu.state.gpr[30] = 0xAAAA_AAAA;
@@ -3393,7 +3445,7 @@ mod tests {
             (63 << 26) | (2 << 23) | (1 << 16) | (3 << 11) | (32 << 1),
         );
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.5;
         cpu.state.fpr[3] = 2.25;
@@ -3418,7 +3470,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (12 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
 
@@ -3433,7 +3485,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         // stfs f1,4(r3)
         put_instruction(&mut memory, 0x1000, (52 << 26) | (1 << 21) | (3 << 16) | 4);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1000;
         cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
@@ -3457,7 +3509,7 @@ mod tests {
             0x1000,
             (31 << 26) | (1 << 21) | (2 << 11) | (663 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[2] = 0x1004;
         cpu.state.fpr[1] = 1.0 + 2.0_f64.powi(-24);
@@ -3481,7 +3533,7 @@ mod tests {
         memory
             .write_u32_be(GuestAddress(0x1004), 0x7F80_0001)
             .unwrap();
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1000;
 
@@ -3504,7 +3556,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
         cpu.state.fpr[3] = 2.0_f64.powi(-24);
@@ -3525,7 +3577,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpr[3] = 1.0;
@@ -3555,7 +3607,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0_f64.powi(-53);
@@ -3585,7 +3637,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (264 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -2.5;
         cpu.state.fpscr = 0xA000_0000;
@@ -3616,7 +3668,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | (23 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpr[3] = -0.0;
@@ -3650,7 +3702,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0;
@@ -3672,7 +3724,7 @@ mod tests {
             0x1004,
             (63 << 26) | (0xFF << 17) | (1 << 11) | (711 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0xA123_4567;
 
@@ -3693,7 +3745,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (846 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits(9_007_199_254_740_993);
 
@@ -3722,7 +3774,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode_mcrfs(3, 0));
         put_instruction(&mut memory, 0x100C, encode_mcrfs(4, 7));
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         for _ in 0..4 {
             cpu.step(&mut memory).unwrap();
@@ -3748,7 +3800,7 @@ mod tests {
         put_instruction(&mut memory, 0x1014, encode_mtfsb(2, 38)); // cannot set VX
         put_instruction(&mut memory, 0x1018, encode_mcrfs(2, 3));
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = (1 << 31)
             | (1 << 30)
@@ -3781,7 +3833,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mcrfs cr0, FPSCR field 5
         put_instruction(&mut memory, 0x1000, (63 << 26) | (5 << 18) | (64 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = (1 << 10) | (1 << 9) | (1 << 8); // VXSOFT, VXSQRT, VXCVI
 
@@ -3797,7 +3849,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtfsb1 VXSQRT (FPSCR bit 22 in PowerPC numbering)
         put_instruction(&mut memory, 0x1000, (63 << 26) | (22 << 21) | (38 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         cpu.step(&mut memory).unwrap();
@@ -3816,7 +3868,7 @@ mod tests {
             0x1000,
             (63 << 26) | (5 << 23) | (2 << 12) | (134 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         cpu.step(&mut memory).unwrap();
@@ -3828,7 +3880,7 @@ mod tests {
 
     #[test]
     fn fpscr_vx_summary_excludes_fraction_and_result_flags() {
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.fpscr = (1 << 18) | (1 << 17) | 0x0001_F000;
         cpu.refresh_fpscr_fex();
         assert_eq!(cpu.state.fpscr & (1 << 29), 0);
@@ -3846,7 +3898,7 @@ mod tests {
         put_instruction(&mut memory, 0x1000, encode_mtfsb(0, 38)); // set FPSCR[0]
         put_instruction(&mut memory, 0x1004, encode_mtfsb(1, 70)); // clear FPSCR[1]
         put_instruction(&mut memory, 0x1008, encode_mtfsf(0x01, 2)); // replace FPSCR field 7
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 0x4000_0000;
         cpu.state.fpr[2] = f64::from_bits(0x5);
@@ -3872,7 +3924,7 @@ mod tests {
             0x1004,
             (63 << 26) | (4 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
@@ -3895,13 +3947,13 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 10.0;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 4; // ZE enable
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -3934,7 +3986,7 @@ mod tests {
             0x1004,
             (63 << 26) | (3 << 23) | (1 << 16) | (2 << 11) | (32 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::NAN;
         cpu.state.fpr[2] = 1.0;
@@ -3964,7 +4016,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (12 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
 
@@ -4025,7 +4077,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 99.0;
         cpu.state.fpr[2] = 1.0;
@@ -4056,7 +4108,7 @@ mod tests {
             0x1004,
             (63 << 26) | (3 << 21) | (4 << 11) | (26 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 10.0;
         cpu.state.fpr[2] = 0.0;
@@ -4088,7 +4140,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (26 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 4.0;
         cpu.state.fpscr = (1 << 18) | (1 << 17);
@@ -4122,7 +4174,7 @@ mod tests {
             0x1008,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (23 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         assert!(matches!(
             cpu.step(&mut memory),
@@ -4149,7 +4201,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 11) | (24 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0 + 2.0_f64.powi(-24);
 
@@ -4171,7 +4223,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -(f32::from_bits(1) as f64);
         cpu.state.fpr[3] = -0.0;
@@ -4194,7 +4246,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 6) | (25 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits(1);
         cpu.state.fpr[3] = -1.0;
@@ -4217,12 +4269,12 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::MAX as f64;
         cpu.state.fpr[3] = f32::MAX as f64;
         cpu.state.fpscr = 1 << 6; // OE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -4251,7 +4303,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
@@ -4280,14 +4332,14 @@ mod tests {
             0x1004,
             (63 << 26) | (4 << 21) | (5 << 16) | (6 << 6) | (25 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::MAX;
         cpu.state.fpr[3] = f64::MAX;
         cpu.state.fpr[5] = f64::from_bits(1);
         cpu.state.fpr[6] = 1.0;
         cpu.state.fpscr = 1 << 6; // OE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
@@ -4304,7 +4356,7 @@ mod tests {
 
         cpu.state.pc = 0x1004;
         cpu.state.fpscr = 1 << 5; // UE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.take_pending_exception(),
@@ -4328,7 +4380,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits(1);
         cpu.state.fpr[3] = 2.0;
@@ -4357,7 +4409,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 6) | (25 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::MAX;
         cpu.state.fpr[3] = 2.0;
@@ -4398,12 +4450,12 @@ mod tests {
             0x1000,
             (63 << 26) | (2 << 23) | (1 << 16) | (2 << 11) | (32 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x7FF0_0000_0000_0001);
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode enabled
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode enabled
 
         cpu.step(&mut memory).unwrap();
         assert_ne!(cpu.state.fpscr & (1 << 24), 0); // VXSNAN
@@ -4434,7 +4486,7 @@ mod tests {
             0x1004,
             (63 << 26) | (2 << 23) | (4 << 16) | (5 << 11) | (32 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
@@ -4465,7 +4517,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1) | 1,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 42.0;
         cpu.state.fpr[2] = 0.0;
@@ -4492,12 +4544,12 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (14 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 99.0;
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -4516,7 +4568,7 @@ mod tests {
         put_instruction(&mut memory, 0x1000, fdiv);
         put_instruction(&mut memory, 0x1004, clear_fx);
         put_instruction(&mut memory, 0x1008, fdiv);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
@@ -4544,7 +4596,7 @@ mod tests {
         put_instruction(&mut memory, 0x1000, fmadd(1, 2, 4, 3));
         put_instruction(&mut memory, 0x1004, fmadd(5, 2, 6, 3));
         put_instruction(&mut memory, 0x1008, fmadd(9, 2, 7, 3));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::INFINITY;
         cpu.state.fpr[3] = 0.0;
@@ -4582,7 +4634,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 11) | (22 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = -1.0;
 
@@ -4613,7 +4665,7 @@ mod tests {
             0x1008,
             (63 << 26) | (6 << 21) | (7 << 16) | (8 << 6) | (25 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
@@ -4646,7 +4698,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode_x(5, 855));
         put_instruction(&mut memory, 0x100C, encode_x(6, 887));
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
         cpu.state.fpr[2] = -42.75;
@@ -4680,7 +4732,7 @@ mod tests {
             0x1004,
             (63 << 26) | (3 << 21) | (2 << 11) | (15 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
         cpu.state.fpr[3] = f64::from_bits(0x8765_4321_ABCD_EF01);
@@ -4714,7 +4766,7 @@ mod tests {
             0x1004,
             (63 << 26) | (3 << 21) | (2 << 11) | (815 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = f64::from_bits(0x1234_5678_9ABC_DEF0);
         cpu.state.fpr[2] = 42.75;
@@ -4758,7 +4810,7 @@ mod tests {
             0x100C,
             (63 << 26) | (7 << 21) | (8 << 11) | (814 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::INFINITY;
         cpu.state.fpr[4] = f64::NEG_INFINITY;
@@ -4787,7 +4839,7 @@ mod tests {
         put_instruction(&mut memory, 0x1004, encode_vx(4, 1, 2, 0x040)); // vadduhm
         put_instruction(&mut memory, 0x1008, encode_vx(5, 1, 2, 0x404)); // vand
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         for lane in 0..16 {
             cpu.state.vr[1][lane] = lane as u8;
@@ -4832,7 +4884,7 @@ mod tests {
                 .unwrap();
         }
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1013;
         cpu.state.gpr[4] = 0;
@@ -4866,7 +4918,7 @@ mod tests {
             .write_u32_be(GuestAddress(0x1010), 1.5_f32.to_bits())
             .unwrap();
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1010;
         cpu.state.fpr[2] = 2.25;
@@ -4894,7 +4946,7 @@ mod tests {
             0x1004,
             (28 << 26) | (5 << 21) | (4 << 16) | 0xFFFF,
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = u64::MAX;
 
@@ -4912,7 +4964,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mulli r4,r0,2
         put_instruction(&mut memory, 0x1000, (7 << 26) | (4 << 21) | 2);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[0] = 3;
 
@@ -4930,7 +4982,7 @@ mod tests {
             0x1000,
             (21 << 26) | (3 << 21) | (4 << 16) | (8 << 11) | (8 << 6) | (23 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1234_5678;
 
@@ -4946,7 +4998,7 @@ mod tests {
         put_instruction(&mut memory, 0x1000, (36 << 26) | (3 << 21) | 16);
         // lwz r4, 16(r0)
         put_instruction(&mut memory, 0x1004, (32 << 26) | (4 << 21) | 16);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0x1234_ABCD_FEDC_BA98;
 
@@ -4971,7 +5023,7 @@ mod tests {
         memory
             .write_u32_be(GuestAddress(0x1000), (14 << 26) | (3 << 21) | 9)
             .unwrap();
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         cpu.step(&mut memory).unwrap();
@@ -4984,7 +5036,7 @@ mod tests {
     fn unsupported_instruction_fails_instead_of_succeeding_silently() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         put_instruction(&mut memory, 0x1000, 0);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         assert_eq!(
@@ -4999,7 +5051,7 @@ mod tests {
     #[test]
     fn instruction_fetch_reports_memory_errors() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 0);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
 
         assert_eq!(
@@ -5017,12 +5069,12 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 5; // UE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode enabled
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode enabled
 
         cpu.step(&mut memory).unwrap();
 
@@ -5049,7 +5101,7 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f32::from_bits(1) as f64;
         cpu.state.fpr[3] = 0.0;
@@ -5074,13 +5126,13 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[1] = 123.0;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         let expected = PpcException::FloatingPoint {
             instruction_pc: 0x1000,
@@ -5102,10 +5154,10 @@ mod tests {
             0x1000,
             (63 << 26) | (6 << 23) | (8 << 12) | (134 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 1 << 21; // VXZDZ, VE initially clear
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
 
         cpu.step(&mut memory).unwrap();
 
@@ -5130,10 +5182,10 @@ mod tests {
             0x1000,
             (63 << 26) | (0xFF << 17) | (2 << 11) | (711 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits((1 << 21) | (1 << 7));
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
 
         cpu.step(&mut memory).unwrap();
 
@@ -5154,10 +5206,10 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtfsb1 10: set FPSCR[VXZDZ].
         put_instruction(&mut memory, 0x1000, (63 << 26) | (10 << 21) | (38 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpscr = 1 << 7; // VE already enabled
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
 
         cpu.step(&mut memory).unwrap();
 
@@ -5174,22 +5226,22 @@ mod tests {
 
     #[test]
     fn msr_fe_bits_decode_all_four_powerpc_exception_modes() {
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Disabled);
 
-        cpu.state.msr = PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP;
         assert_eq!(
             cpu.fp_exception_mode(),
             PpcFpExceptionMode::ImpreciseNonRecoverable
         );
 
-        cpu.state.msr = PPC_MSR_FE0;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FP;
         assert_eq!(
             cpu.fp_exception_mode(),
             PpcFpExceptionMode::ImpreciseRecoverable
         );
 
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
         assert_eq!(cpu.fp_exception_mode(), PpcFpExceptionMode::Precise);
     }
 
@@ -5202,12 +5254,12 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0; // imprecise recoverable
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FP; // imprecise recoverable
 
         cpu.step(&mut memory).unwrap();
 
@@ -5230,7 +5282,7 @@ mod tests {
             0x1000,
             (31 << 26) | (3 << 21) | (1 << 16) | (146 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
 
@@ -5251,7 +5303,7 @@ mod tests {
         // mtmsr r3; addi r4,r4,1
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
         cpu.state.fpscr = (1 << 30) | (1 << 29) | (1 << 24) | (1 << 7);
@@ -5279,10 +5331,10 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtmsr r3
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1;
-        cpu.state.msr = PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP;
         cpu.pending_exception = Some(PpcException::FloatingPoint {
             instruction_pc: 0x0FFC,
             causes: (1 << 26) | (1 << 25),
@@ -5304,7 +5356,7 @@ mod tests {
         // mtmsr r3; addi r4,r4,1
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE1;
         cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // ZX + ZE => FEX
@@ -5330,9 +5382,9 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtmsr r3
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
-        cpu.state.msr = PPC_MSR_FE0;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FP;
         cpu.state.gpr[3] = PPC_MSR_FE0;
         cpu.state.fpscr = (1 << 30) | (1 << 29) | (1 << 24) | (1 << 7);
 
@@ -5353,12 +5405,12 @@ mod tests {
         );
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
         put_instruction(&mut memory, 0x1008, (31 << 26) | (598 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE1; // imprecise nonrecoverable
+        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP; // imprecise nonrecoverable
 
         cpu.step(&mut memory).unwrap();
         let pending = cpu.pending_exception().expect("imprecise FP event");
@@ -5384,12 +5436,12 @@ mod tests {
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
         put_instruction(&mut memory, 0x1004, (19 << 26) | (150 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0; // imprecise recoverable
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FP; // imprecise recoverable
 
         cpu.step(&mut memory).unwrap();
         let pending = cpu.pending_exception().expect("imprecise FP event");
@@ -5412,12 +5464,12 @@ mod tests {
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE1; // imprecise nonrecoverable
+        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP; // imprecise nonrecoverable
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
@@ -5443,7 +5495,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
@@ -5466,12 +5518,12 @@ mod tests {
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
         put_instruction(&mut memory, 0x1004, 14 << 26);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
 
         cpu.step(&mut memory).unwrap();
         let pending = cpu.pending_exception().expect("enabled FP exception");
@@ -5492,7 +5544,7 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 0.0;
         cpu.state.fpr[3] = 0.0;
@@ -5511,12 +5563,12 @@ mod tests {
             0x1000,
             (59 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 2.0_f64.powi(-24);
         cpu.state.fpscr = 1 << 3; // XE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -5542,12 +5594,12 @@ mod tests {
             0x1000,
             (63 << 26) | (1 << 23) | (2 << 16) | (3 << 11) | (32 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::NAN;
         cpu.state.fpr[3] = 1.0;
         cpu.state.fpscr = 1 << 7; // VE
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1; // precise FP exception mode
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP; // precise FP exception mode
 
         cpu.step(&mut memory).unwrap();
 
@@ -5581,7 +5633,7 @@ mod tests {
         for instruction in fpscr_instructions {
             let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
             put_instruction(&mut memory, 0x1000, instruction);
-            let mut cpu = PpcInterpreter::default();
+            let mut cpu = fp_enabled_cpu();
             cpu.state.pc = 0x1000;
             cpu.state.fpscr = 0xA123_4567;
             cpu.state.fpr[1] = f64::from_bits(0xFFF8_0000_7654_3210);
@@ -5615,7 +5667,7 @@ mod tests {
             0x1000,
             (63 << 26) | (0xFF << 17) | (2 << 11) | (711 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.fpr[2] = f64::from_bits(1 << 9);
 
@@ -5628,7 +5680,7 @@ mod tests {
 
     #[test]
     fn precise_fp_exception_enters_program_vector_and_saves_xenon_state() {
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         let original_msr = 0x0000_1234_0000_0030 | PPC_MSR_FE0 | PPC_MSR_FE1;
         let exception = PpcException::FloatingPoint {
             instruction_pc: 0x1234,
@@ -5660,14 +5712,14 @@ mod tests {
 
     #[test]
     fn imprecise_fp_exception_saves_first_faulting_instruction_without_subsequent_marker() {
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         let exception = PpcException::FloatingPoint {
             instruction_pc: 0x1008,
             causes: 1 << 25,
             mode: PpcFpExceptionMode::ImpreciseRecoverable,
         };
         cpu.state.pc = 0x1020; // A later synchronization boundary reported it.
-        cpu.state.msr = PPC_MSR_FE0;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FP;
         cpu.pending_exception = Some(exception);
 
         assert_eq!(cpu.enter_pending_exception(), Some(exception));
@@ -5683,14 +5735,14 @@ mod tests {
 
     #[test]
     fn enabling_fe_with_sticky_fex_saves_next_pc_and_subsequent_marker() {
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         let exception = PpcException::FloatingPointEnableTransition {
             next_pc: 0x2004,
             causes: 1 << 29,
             mode: PpcFpExceptionMode::ImpreciseNonRecoverable,
         };
         cpu.state.pc = 0x2004;
-        cpu.state.msr = PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE1 | PPC_MSR_FP;
         cpu.pending_exception = Some(exception);
 
         assert_eq!(cpu.enter_pending_exception(), Some(exception));
@@ -5709,7 +5761,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x700), 4);
         // rfid (opcode 19, XO 18).
         put_instruction(&mut memory, 0x700, (19 << 26) | (18 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         let original_msr = 0x0000_1234_0000_0030 | PPC_MSR_FE0 | PPC_MSR_FE1;
         cpu.state.msr = original_msr;
         cpu.state.pc = 0x1234;
@@ -5746,7 +5798,7 @@ mod tests {
         put_instruction(&mut memory, 0x1008, encode_spr(5, 26, 467)); // mtspr SRR0,r5
         put_instruction(&mut memory, 0x100C, encode_spr(6, 27, 467)); // mtspr SRR1,r6
 
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.srr0 = 0x1234_5678;
         cpu.state.srr1 = 0xFEDC_BA98_7654_3210;
@@ -5769,7 +5821,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtmsr r3 (opcode 31, XO 146).
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (146 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = 0xA123_4567_89AB_CDEF;
 
@@ -5788,9 +5840,9 @@ mod tests {
             (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (18 << 1),
         );
         put_instruction(&mut memory, 0x1004, (14 << 26) | (4 << 21) | (4 << 16) | 1);
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
-        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1;
+        cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | PPC_MSR_FP;
         cpu.state.fpscr = 1 << 4; // ZE
         cpu.state.fpr[2] = 1.0;
         cpu.state.fpr[3] = 0.0;
@@ -5815,7 +5867,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mfmsr r3 (opcode 31, XO 83).
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (83 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.msr = 0xA123_4567_89AB_CDEF;
 
@@ -5830,7 +5882,7 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         // mtmsrd r3,L=0 (opcode 31, XO 178).
         put_instruction(&mut memory, 0x1000, (31 << 26) | (3 << 21) | (178 << 1));
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.gpr[3] = PPC_MSR_FE0 | PPC_MSR_FE1 | (1 << 62) | (1 << 14);
         cpu.state.fpscr = (1 << 30) | (1 << 26) | (1 << 4); // FEX + ZX + ZE
@@ -5861,7 +5913,7 @@ mod tests {
             0x1000,
             (31 << 26) | (3 << 21) | (1 << 16) | (178 << 1),
         );
-        let mut cpu = PpcInterpreter::default();
+        let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.msr = PPC_MSR_FE0 | PPC_MSR_FE1 | 0x1234;
         cpu.state.gpr[3] = (1 << 15) | (1 << 1);
@@ -5871,4 +5923,92 @@ mod tests {
         assert_eq!(cpu.state.msr, PPC_MSR_FE0 | PPC_MSR_FE1 | 0x9236);
         assert_eq!(cpu.state.pc, 0x1004);
     }
+    #[test]
+    fn fpu_unavailable_uses_vector_800_and_does_not_set_fp_enabled_syndrome() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        // fadd f1,f2,f3.
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[1] = 99.0;
+        cpu.state.fpr[2] = 2.0;
+        cpu.state.fpr[3] = 3.0;
+        let exception = PpcException::FloatingPointUnavailable {
+            instruction_pc: 0x1000,
+        };
+
+        assert_eq!(
+            cpu.step(&mut memory),
+            Err(PpcError::PendingException(exception))
+        );
+        assert_eq!(cpu.state.fpr[1], 99.0);
+        assert_eq!(cpu.enter_pending_exception(), Some(exception));
+        assert_eq!(cpu.state.srr0, 0x1000);
+        assert_eq!(cpu.state.srr1 & PPC_SRR1_FP_ENABLED_EXCEPTION, 0);
+        assert_eq!(cpu.state.pc, PPC_FP_UNAVAILABLE_VECTOR);
+        assert_eq!(cpu.pending_exception(), None);
+    }
+
+    #[test]
+    fn fpu_unavailable_gate_covers_arithmetic_loads_and_integer_transfers() {
+        let instructions = [
+            (63 << 26) | (21 << 1), // fadd
+            48 << 26,               // lfs
+            (31 << 26) | (887 << 1), // lfiwzx
+        ];
+        for instruction in instructions {
+            let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+            put_instruction(&mut memory, 0x1000, instruction);
+            let mut cpu = PpcInterpreter::default();
+            cpu.state.pc = 0x1000;
+            assert!(matches!(
+                cpu.step(&mut memory),
+                Err(PpcError::PendingException(
+                    PpcException::FloatingPointUnavailable {
+                        instruction_pc: 0x1000
+                    }
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn rfid_can_restore_msr_fp_and_resume_the_faulting_fpu_instruction() {
+        let mut memory = GuestMemory::new(GuestAddress(0x800), 0x804);
+        // rfid at the FPU-unavailable vector, then fadd at the saved PC.
+        put_instruction(&mut memory, 0x800, (19 << 26) | (18 << 1));
+        put_instruction(
+            &mut memory,
+            0x1000,
+            (63 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (21 << 1),
+        );
+        let mut cpu = PpcInterpreter::default();
+        cpu.state.pc = 0x1000;
+        cpu.state.fpr[2] = 2.0;
+        cpu.state.fpr[3] = 3.0;
+
+        let delivered = cpu.step_and_dispatch(&mut memory).unwrap().unwrap();
+        assert_eq!(
+            delivered,
+            PpcException::FloatingPointUnavailable {
+                instruction_pc: 0x1000
+            }
+        );
+        assert_eq!(cpu.state.pc, PPC_FP_UNAVAILABLE_VECTOR);
+
+        // The guest handler enables FP in its saved context before rfid.
+        cpu.state.srr1 |= PPC_MSR_FP;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.pc, 0x1000);
+        assert_ne!(cpu.state.msr & PPC_MSR_FP, 0);
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.fpr[1], 5.0);
+        assert_eq!(cpu.state.pc, 0x1004);
+    }
+
 }
