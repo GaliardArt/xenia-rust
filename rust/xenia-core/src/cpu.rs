@@ -3752,7 +3752,8 @@ impl PpcInterpreter {
                             let sign_extend = |value: u32| ((value << 22) as i32 >> 22) as u32;
                             [
                                 f32::from_bits(
-                                    0x4040_0000_u32.wrapping_add(sign_extend(packed & 0x3FF)),
+                                    0x4040_0000_u32
+                                        .wrapping_add(sign_extend(packed & 0x3FF)),
                                 ),
                                 f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
                                     (packed >> 10) & 0x3FF,
@@ -3760,9 +3761,7 @@ impl PpcInterpreter {
                                 f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
                                     (packed >> 20) & 0x3FF,
                                 ))),
-                                f32::from_bits(
-                                    0x3F80_0000_u32.wrapping_add((packed >> 30) & 0x3),
-                                ),
+                                f32::from_bits(0x3F80_0000_u32.wrapping_add((packed >> 30) & 0x3)),
                             ]
                         }
                         3 => {
@@ -3792,9 +3791,10 @@ impl PpcInterpreter {
                             let packed = u64::from_be_bytes(b[8..16].try_into().unwrap());
                             let sign_extend = |value: u64| ((value << 12) as i64 >> 12) as u32;
                             [
-                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
-                                    (packed & 0xF_FFFF) as u32,
-                                ))),
+                                f32::from_bits(
+                                    0x4040_0000_u32
+                                        .wrapping_add(sign_extend((packed & 0xF_FFFF) as u32)),
+                                ),
                                 f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
                                     ((packed >> 20) & 0xF_FFFF) as u32,
                                 ))),
