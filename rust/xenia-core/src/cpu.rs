@@ -2165,8 +2165,8 @@ impl PpcInterpreter {
                     0b110101 => {
                         // vsel128 uses the old destination as the per-bit selector.
                         let mask = self.state.vr[registers.vd];
-                        for lane in 0..16 {
-                            result[lane] = (a[lane] & !mask[lane]) | (b[lane] & mask[lane]);
+                        for (lane, output) in result.iter_mut().enumerate() {
+                            *output = (a[lane] & !mask[lane]) | (b[lane] & mask[lane]);
                         }
                     }
                     0b111001 | 0b111101 => {
@@ -2302,8 +2302,8 @@ impl PpcInterpreter {
                             let value =
                                 u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
                             let amount =
-                                (u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap())
-                                    & 0x1F) as u32;
+                                u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap())
+                                    & 0x1F;
                             let shifted = match shift_operation {
                                 0b000101 => value.rotate_left(amount),
                                 0b001101 => value.wrapping_shl(amount),
@@ -2387,7 +2387,7 @@ impl PpcInterpreter {
                                 let bf = f32::from_bits(bv);
                                 let (mask, condition) = if compare_operation == 0b011000 {
                                     let above_upper = af > bf;
-                                    let below_lower = !(af >= -bf);
+                                    let below_lower = af < -bf || af.is_nan() || bf.is_nan();
                                     let mask = (if above_upper { 0x8000_0000 } else { 0 })
                                         | (if below_lower { 0x4000_0000 } else { 0 });
                                     (mask, mask == 0)
