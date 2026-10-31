@@ -2941,6 +2941,7 @@ mod tests {
         assert_eq!(decoded.vb, 0x7F);
     }
 
+    #[test]
     fn vmx_wrapping_add_and_subtract_cover_byte_halfword_and_word_lanes() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
         let encode_vmx = |vd: u32, va: u32, vb: u32, xo: u32| {
