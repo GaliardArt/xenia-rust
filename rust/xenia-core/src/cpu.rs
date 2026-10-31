@@ -2106,7 +2106,7 @@ impl PpcInterpreter {
                 }
 
                 match operation {
-                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 => {
+                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 | 0b011001 | 0b011101 => {
                         // Four IEEE-754 binary32 lanes. Fused multiply-add variants
                         // use the destination as the third source, as specified by VX128.
                         let destination = self.state.vr[registers.vd];
@@ -2127,6 +2127,27 @@ impl PpcInterpreter {
                                 0b001001 => av * bv,
                                 0b001101 | 0b010001 => av.mul_add(dv, bv),
                                 0b010101 => bv - av * dv,
+                                0b011001 => {
+                                    let cv = f32::from_bits(u32::from_be_bytes(
+                                        destination[offset..offset + 4].try_into().unwrap(),
+                                    ));
+                                    av.mul_add(bv, cv)
+                                }
+                                0b011101 => {
+                                    let sum = (0..4)
+                                        .map(|index| {
+                                            let lane_offset = index * 4;
+                                            let left = f32::from_bits(u32::from_be_bytes(
+                                                a[lane_offset..lane_offset + 4].try_into().unwrap(),
+                                            ));
+                                            let right = f32::from_bits(u32::from_be_bytes(
+                                                b[lane_offset..lane_offset + 4].try_into().unwrap(),
+                                            ));
+                                            left * right
+                                        })
+                                        .sum::<f32>();
+                                    sum
+                                }
                                 _ => unreachable!(),
                             };
                             result[offset..offset + 4]
@@ -2350,15 +2371,22 @@ impl PpcInterpreter {
                                 let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                                 let af = f32::from_bits(av);
                                 let bf = f32::from_bits(bv);
-                                let condition = match compare_operation {
-                                    0b000000 => af == bf,
-                                    0b000010 => af >= bf,
-                                    0b000100 => af > bf,
-                                    0b000110 => af.is_nan() || bf.is_nan() || af < bf,
-                                    0b100000 => av == bv,
-                                    _ => unreachable!(),
+                                let (mask, condition) = if compare_operation == 0b000110 {
+                                    let above_upper = af > bf;
+                                    let below_lower = !(af >= -bf);
+                                    let mask = (if above_upper { 0x8000_0000 } else { 0 })
+                                        | (if below_lower { 0x4000_0000 } else { 0 });
+                                    (mask, mask == 0)
+                                } else {
+                                    let condition = match compare_operation {
+                                        0b000000 => af == bf,
+                                        0b000010 => af >= bf,
+                                        0b000100 => af > bf,
+                                        0b100000 => av == bv,
+                                        _ => unreachable!(),
+                                    };
+                                    (if condition { u32::MAX } else { 0 }, condition)
                                 };
-                                let mask = if condition { u32::MAX } else { 0 };
                                 result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes());
                                 all_true &= condition;
                                 all_false &= !condition;
