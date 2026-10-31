@@ -3303,6 +3303,26 @@ impl PpcInterpreter {
                 // use VD/VB plus a five-bit immediate in the VA field.
                 let unary_operation = (instruction >> 4) & 0x7F;
                 let immediate = (instruction >> 16) & 0x1F;
+
+                // VX128_3 vupkd3d128 expands two/four IEEE binary16 lanes.
+                if unary_operation == 0b1111111 {
+                    let pack_type = immediate >> 2;
+                    let lane_count = match pack_type {
+                        3 => 2,
+                        5 => 4,
+                        _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
+                    };
+                    for lane in 0..lane_count {
+                        let offset = lane * 2;
+                        let half = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                        result[lane * 4..lane * 4 + 4]
+                            .copy_from_slice(&f16_bits_to_f32(half).to_bits().to_be_bytes());
+                    }
+                    self.state.vr[registers.vd] = result;
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
                 let unary_handled = match unary_operation {
                     0b0100011 | 0b0100111 | 0b0101011 | 0b0101111 | 0b0110011 | 0b0110111
                     | 0b0111011 | 0b0111111 | 0b1100011 | 0b1100111 | 0b1101011 | 0b1101111
@@ -3385,6 +3405,46 @@ impl PpcInterpreter {
                 // VX128_4 immediate word rotate/insert.
                 let special_selector =
                     (((instruction >> 6) & 0x7) << 2) | ((instruction >> 4) & 0x3);
+                // VX128_4 vpkd3d128: pack binary32 lanes into half floats.
+                if special_selector == 0b1100001 {
+                    let immediate = (instruction >> 11) & 0x1F;
+                    let pack_type = immediate >> 2;
+                    let pack_mode = immediate & 3;
+                    if !matches!(pack_type, 3 | 5) {
+                        return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                    }
+                    let lane_count = if pack_type == 3 { 2 } else { 4 };
+                    let source = self.state.vr[registers.vb];
+                    let old = self.state.vr[registers.vd];
+                    let mut packed = [0_u8; 16];
+                    for lane in 0..lane_count {
+                        let offset = lane * 4;
+                        let value = f32::from_bits(u32::from_be_bytes(
+                            source[offset..offset + 4].try_into().unwrap(),
+                        ));
+                        packed[lane * 2..lane * 2 + 2]
+                            .copy_from_slice(&f32_to_f16_bits(value).to_be_bytes());
+                    }
+                    let mut output = old;
+                    match pack_mode {
+                        0 => output = packed,
+                        1 => {
+                            let shift = ((instruction >> 6) & 3) as usize;
+                            let offset = shift * 4;
+                            output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                        }
+                        2 | 3 => {
+                            let shift = ((instruction >> 6) & 3) as usize;
+                            let offset = (shift & 1) * 8;
+                            output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                        }
+                        _ => unreachable!(),
+                    }
+                    self.state.vr[registers.vd] = output;
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
                 if special_selector == 0b1110001 {
                     let rotate = ((instruction >> 6) & 0x3) as usize;
                     let mask = (instruction >> 11) & 0x1F;
