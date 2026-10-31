@@ -3774,11 +3774,8 @@ impl PpcInterpreter {
                             let mut lanes = [0.0; 4];
                             for (lane, value) in lanes.iter_mut().enumerate() {
                                 let offset = 8 + lane * 2;
-                                let raw =
-                                    i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
-                                *value = f32::from_bits(
-                                    0x4040_0000_u32.wrapping_add(raw as u32),
-                                );
+                                let raw = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
+                                *value = f32::from_bits(0x4040_0000_u32.wrapping_add(raw as u32));
                             }
                             lanes
                         }
@@ -3933,10 +3930,8 @@ impl PpcInterpreter {
                         }
                         1 => {
                             for lane in 0..2 {
-                                let raw =
-                                    clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
-                                packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&raw.to_be_bytes());
+                                let raw = clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
+                                packed[lane * 2..lane * 2 + 2].copy_from_slice(&raw.to_be_bytes());
                             }
                             4
                         }
@@ -3981,8 +3976,7 @@ impl PpcInterpreter {
                                 (clamp_bits(floats[1], 0x4038_0001, 0x4047_FFFF) & 0xF_FFFF) as u64;
                             let z =
                                 (clamp_bits(floats[2], 0x4038_0001, 0x4047_FFFF) & 0xF_FFFF) as u64;
-                            let w =
-                                (clamp_bits(floats[3], 0x4040_0000, 0x4040_000F) & 0xF) as u64;
+                            let w = (clamp_bits(floats[3], 0x4040_0000, 0x4040_000F) & 0xF) as u64;
                             let value = x | (y << 20) | (z << 40) | (w << 60);
                             packed[..8].copy_from_slice(&value.to_be_bytes());
                             8
@@ -9023,7 +9017,10 @@ mod tests {
                 .copy_from_slice(&packed[source_offset..source_offset + count]);
             cpu.state.vr[0x46] = [0xAA; 16];
             cpu.step(&mut memory).unwrap();
-            assert_eq!(cpu.state.vr[0x46], expected, "pack immediate {immediate}, shift {shift}");
+            assert_eq!(
+                cpu.state.vr[0x46], expected,
+                "pack immediate {immediate}, shift {shift}"
+            );
         }
     }
 
