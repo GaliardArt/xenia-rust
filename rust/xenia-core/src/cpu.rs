@@ -9047,7 +9047,7 @@ mod tests {
         let cases = [
             (
                 0,
-                [0xCD; 12].into_iter().chain([0x04, 0x01, 0x02, 0x03]).collect::<Vec<_>>(),
+                [0xCD_u8; 12].into_iter().chain([0x04, 0x01, 0x02, 0x03]).collect::<Vec<_>>(),
                 [0x3F80_0001, 0x3F80_0002, 0x3F80_0003, 0x3F80_0004],
             ),
             (
@@ -9062,7 +9062,7 @@ mod tests {
             ),
             (
                 5,
-                [0xCD; 8].into_iter().chain([0x38, 0x00, 0xB8, 0x01, 0x38, 0x02, 0xB8, 0x03]).collect::<Vec<_>>(),
+                [0xCD_u8; 8].into_iter().chain([0x38, 0x00, 0xB8, 0x01, 0x38, 0x02, 0xB8, 0x03]).collect::<Vec<_>>(),
                 [0x3F00_0000, 0xBF00_2000, 0x3F00_4000, 0xBF00_6000],
             ),
         ];
