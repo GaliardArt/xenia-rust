@@ -3304,19 +3304,65 @@ impl PpcInterpreter {
                 let unary_operation = (instruction >> 4) & 0x7F;
                 let immediate = (instruction >> 16) & 0x1F;
 
-                // VX128_3 vupkd3d128 expands two/four IEEE binary16 lanes.
+                // VX128_3 vupkd3d128 expands packed D3D formats into float lanes.
                 if unary_operation == 0b1111111 {
                     let pack_type = immediate >> 2;
-                    let lane_count = match pack_type {
-                        3 => 2,
-                        5 => 4,
+                    let unpacked = match pack_type {
+                        0 => {
+                            let channels = [b[1], b[2], b[3], b[0]];
+                            channels.map(|channel| channel as f32 / 255.0)
+                        }
+                        1 => {
+                            let x = i16::from_be_bytes([b[0], b[1]]) as f32 / 32767.0;
+                            let y = i16::from_be_bytes([b[2], b[3]]) as f32 / 32767.0;
+                            [x.max(-1.0), y.max(-1.0), 0.0, 1.0]
+                        }
+                        2 => {
+                            let packed = u32::from_be_bytes(b[..4].try_into().unwrap());
+                            [
+                                (packed & 0x3FF) as f32 / 1023.0,
+                                ((packed >> 10) & 0x3FF) as f32 / 1023.0,
+                                ((packed >> 20) & 0x3FF) as f32 / 1023.0,
+                                ((packed >> 30) & 0x3) as f32 / 3.0,
+                            ]
+                        }
+                        3 => {
+                            let x = u16::from_be_bytes([b[0], b[1]]);
+                            let y = u16::from_be_bytes([b[2], b[3]]);
+                            [f16_bits_to_f32(x), f16_bits_to_f32(y), 0.0, 1.0]
+                        }
+                        4 => {
+                            let mut lanes = [0.0; 4];
+                            for lane in 0..4 {
+                                let offset = lane * 2;
+                                let value = i16::from_be_bytes([b[offset], b[offset + 1]]) as f32;
+                                lanes[lane] = (value / 32767.0).max(-1.0);
+                            }
+                            lanes
+                        }
+                        5 => {
+                            let mut lanes = [0.0; 4];
+                            for lane in 0..4 {
+                                let offset = lane * 2;
+                                let half = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                                lanes[lane] = f16_bits_to_f32(half);
+                            }
+                            lanes
+                        }
+                        6 => {
+                            let packed = u64::from_be_bytes(b[..8].try_into().unwrap());
+                            [
+                                (packed & 0xF_FFFF) as f32 / 1_048_575.0,
+                                ((packed >> 20) & 0xF_FFFF) as f32 / 1_048_575.0,
+                                ((packed >> 40) & 0xF_FFFF) as f32 / 1_048_575.0,
+                                ((packed >> 60) & 0xF) as f32 / 15.0,
+                            ]
+                        }
                         _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                     };
-                    for lane in 0..lane_count {
-                        let offset = lane * 2;
-                        let half = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                    for (lane, value) in unpacked.into_iter().enumerate() {
                         result[lane * 4..lane * 4 + 4]
-                            .copy_from_slice(&f16_bits_to_f32(half).to_bits().to_be_bytes());
+                            .copy_from_slice(&value.to_bits().to_be_bytes());
                     }
                     self.state.vr[registers.vd] = result;
                     self.state.pc = next_pc;
