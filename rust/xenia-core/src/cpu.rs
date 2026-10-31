@@ -2309,7 +2309,7 @@ impl PpcInterpreter {
                                     exact.clamp(min, max) as u64
                                 } else {
                                     let max = (1_u64 << bits) - 1;
-                                    let exact = if subtract {
+                                    if subtract {
                                         if av < bv {
                                             saturated = true;
                                             0
@@ -2320,8 +2320,7 @@ impl PpcInterpreter {
                                         let sum = av + bv;
                                         saturated |= sum > max;
                                         sum.min(max)
-                                    };
-                                    exact
+                                    }
                                 };
                                 match width {
                                     1 => result[offset] = raw as u8,
@@ -2440,7 +2439,6 @@ impl PpcInterpreter {
                         let equal = matches!(xo, 6 | 70 | 134 | 198);
                         let fp = matches!(xo, 198 | 454 | 710 | 966);
                         let greater_equal = xo == 454;
-                        let greater = matches!(xo, 518 | 582 | 646 | 710 | 774 | 838 | 902);
                         let mut all_true = true;
                         let mut all_false = true;
                         if xo == 966 {
