@@ -2248,6 +2248,74 @@ impl PpcInterpreter {
                             }
                         }
                     }
+                    // AltiVec compares: the record form summarizes all lanes in CR6.
+                    6 | 70 | 134 | 198 | 454 | 518 | 582 | 646 | 710 | 774 | 838 | 902 | 966 => {
+                        let width = if matches!(xo, 6 | 518 | 774) { 1 }
+                            else if matches!(xo, 70 | 582 | 838) { 2 } else { 4 };
+                        let signed = matches!(xo, 774 | 838 | 902);
+                        let equal = matches!(xo, 6 | 70 | 134 | 198);
+                        let fp = matches!(xo, 198 | 454 | 710 | 966);
+                        let greater_equal = xo == 454;
+                        let greater = matches!(xo, 518 | 582 | 646 | 710 | 774 | 838 | 902);
+                        let mut all_true = true;
+                        let mut all_false = true;
+                        if xo == 966 {
+                            for lane in 0..4 {
+                                let offset = lane * 4;
+                                let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                                let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                                let above = av > bv;
+                                let below = av < -bv || av.is_nan() || bv.is_nan();
+                                let mask = (if above { 0x8000_0000 } else { 0 })
+                                    | (if below { 0x4000_0000 } else { 0 });
+                                result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes());
+                                all_true &= mask == 0;
+                                all_false &= mask == 0xC000_0000;
+                            }
+                        } else {
+                            for offset in (0..16).step_by(width) {
+                                let (is_true, mask) = match width {
+                                    1 => {
+                                        let av = if signed { a[offset] as i8 as i16 } else { a[offset] as i16 };
+                                        let bv = if signed { b[offset] as i8 as i16 } else { b[offset] as i16 };
+                                        let yes = if equal { av == bv } else if greater_equal { av >= bv } else { av > bv };
+                                        (yes, if yes { u32::MAX } else { 0 })
+                                    }
+                                    2 => {
+                                        let av = u16::from_be_bytes([a[offset], a[offset + 1]]);
+                                        let bv = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                                        let (av, bv) = if signed { (av as i16 as i32, bv as i16 as i32) } else { (av as i32, bv as i32) };
+                                        let yes = if equal { av == bv } else if greater_equal { av >= bv } else { av > bv };
+                                        (yes, if yes { u32::MAX } else { 0 })
+                                    }
+                                    _ => {
+                                        if fp {
+                                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                                            let yes = if equal { av == bv } else if greater_equal { av >= bv } else { av > bv };
+                                            (yes, if yes { u32::MAX } else { 0 })
+                                        } else {
+                                            let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                                            let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                                            let (av, bv) = if signed { (av as i32 as i64, bv as i32 as i64) } else { (av as i64, bv as i64) };
+                                            let yes = if equal { av == bv } else if greater_equal { av >= bv } else { av > bv };
+                                            (yes, if yes { u32::MAX } else { 0 })
+                                        }
+                                    }
+                                };
+                                match width {
+                                    1 => result[offset] = mask as u8,
+                                    2 => result[offset..offset + 2].copy_from_slice(&(mask as u16).to_be_bytes()),
+                                    _ => result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes()),
+                                }
+                                all_true &= is_true;
+                                all_false &= !is_true;
+                            }
+                        }
+                        if instruction & 1 != 0 {
+                            self.state.cr[6] = if all_true { 0b1000 } else if all_false { 0b0010 } else { 0b0100 };
+                        }
+                    }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.vr[vd] = result;
