@@ -9104,8 +9104,7 @@ mod tests {
         cpu.state.pc = 0x1000;
         for (pack_type, (input, expected)) in cases.into_iter().enumerate() {
             for (lane, bits) in input.iter().copied().enumerate() {
-                cpu.state.vr[0x25][lane * 4..lane * 4 + 4]
-                    .copy_from_slice(&bits.to_be_bytes());
+                cpu.state.vr[0x25][lane * 4..lane * 4 + 4].copy_from_slice(&bits.to_be_bytes());
             }
             cpu.step(&mut memory).unwrap();
             cpu.step(&mut memory).unwrap();
