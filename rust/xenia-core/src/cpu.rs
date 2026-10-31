@@ -2068,6 +2068,114 @@ impl PpcInterpreter {
                             result[lane] = !(a[lane] | b[lane]);
                         }
                     }
+                    // AltiVec lane-wise min/max operations.
+                    2 | 66 | 130 | 258 | 322 | 386 | 514 | 578 | 642 | 770 | 834 | 898 => {
+                        let width = if matches!(xo, 2 | 258 | 514 | 770) { 1 }
+                            else if matches!(xo, 66 | 322 | 578 | 834) { 2 } else { 4 };
+                        let signed = matches!(xo, 258 | 322 | 386 | 770 | 834 | 898);
+                        let maximum = matches!(xo, 2 | 66 | 130 | 258 | 322 | 386);
+                        for offset in (0..16).step_by(width) {
+                            match width {
+                                1 => {
+                                    let (av, bv) = if signed { (a[offset] as i8 as i16, b[offset] as i8 as i16) } else { (a[offset] as i16, b[offset] as i16) };
+                                    result[offset] = (if maximum { av.max(bv) } else { av.min(bv) }) as u8;
+                                }
+                                2 => {
+                                    let av = u16::from_be_bytes([a[offset], a[offset + 1]]);
+                                    let bv = u16::from_be_bytes([b[offset], b[offset + 1]]);
+                                    let (av, bv) = if signed { (av as i16 as i32, bv as i16 as i32) } else { (av as i32, bv as i32) };
+                                    result[offset..offset + 2].copy_from_slice(&(if maximum { av.max(bv) } else { av.min(bv) } as u16).to_be_bytes());
+                                }
+                                _ => {
+                                    let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                                    let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                                    let value = if signed {
+                                        let (av, bv) = (av as i32, bv as i32);
+                                        (if maximum { av.max(bv) } else { av.min(bv) }) as u32
+                                    } else if maximum { av.max(bv) } else { av.min(bv) };
+                                    result[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+                                }
+                            }
+                        }
+                    }
+                    // Vector rotate and logical/arithmetic shifts by lane.
+                    4 | 68 | 132 | 260 | 324 | 388 | 516 | 580 | 644 | 772 | 836 | 900 => {
+                        let width = if matches!(xo, 4 | 260 | 516 | 772) { 1 }
+                            else if matches!(xo, 68 | 324 | 580 | 836) { 2 } else { 4 };
+                        let arithmetic = matches!(xo, 772 | 836 | 900);
+                        let left_shift = matches!(xo, 260 | 324 | 388);
+                        for offset in (0..16).step_by(width) {
+                            let bits = (width * 8) as u32;
+                            let (value, amount) = match width {
+                                1 => (a[offset] as u32, (b[offset] & (bits as u8 - 1)) as u32),
+                                2 => (u16::from_be_bytes([a[offset], a[offset + 1]]) as u32,
+                                      (u16::from_be_bytes([b[offset], b[offset + 1]]) & (bits as u16 - 1)) as u32),
+                                _ => (u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()),
+                                      u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()) & (bits - 1)),
+                            };
+                            let mask = if bits == 32 { u32::MAX } else { (1_u32 << bits) - 1 };
+                            let shifted = if left_shift {
+                                (value << amount) & mask
+                            } else if arithmetic {
+                                (((value << (32 - bits)) as i32) >> amount) as u32 & mask
+                            } else if matches!(xo, 4 | 68 | 132) {
+                                if amount == 0 { value } else { ((value << amount) | (value >> (bits - amount))) & mask }
+                            } else {
+                                value >> amount
+                            };
+                            match width {
+                                1 => result[offset] = shifted as u8,
+                                2 => result[offset..offset + 2].copy_from_slice(&(shifted as u16).to_be_bytes()),
+                                _ => result[offset..offset + 4].copy_from_slice(&shifted.to_be_bytes()),
+                            }
+                        }
+                    }
+                    // Vector floating-point arithmetic, estimates and rounding.
+                    10 | 74 | 266 | 330 | 394 | 458 | 522 | 586 | 650 | 714 | 1034 | 1098 => {
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                            let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                            let value = match xo {
+                                10 => av + bv,
+                                74 => av - bv,
+                                266 => 1.0 / bv,
+                                330 => 1.0 / bv.sqrt(),
+                                394 => 2.0_f32.powf(bv),
+                                458 => bv.log2(),
+                                522 => bv.round_ties_even(),
+                                586 => bv.trunc(),
+                                650 => bv.ceil(),
+                                714 => bv.floor(),
+                                1034 => av.max(bv),
+                                1098 => av.min(bv),
+                                _ => unreachable!(),
+                            };
+                            result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                        }
+                    }
+                    // Immediate and indexed splats.
+                    524 | 588 | 652 | 780 | 844 | 908 => {
+                        let selector = (instruction >> 16) & 0x1F;
+                        if matches!(xo, 780 | 844 | 908) {
+                            let signed = if selector & 0x10 != 0 { (selector | 0xFFFF_FFE0) as i32 } else { selector as i32 };
+                            let width = if xo == 780 { 1 } else if xo == 844 { 2 } else { 4 };
+                            for offset in (0..16).step_by(width) {
+                                match width {
+                                    1 => result[offset] = signed as i8 as u8,
+                                    2 => result[offset..offset + 2].copy_from_slice(&(signed as i16).to_be_bytes()),
+                                    _ => result[offset..offset + 4].copy_from_slice(&signed.to_be_bytes()),
+                                }
+                            }
+                        } else {
+                            let width = if xo == 524 { 1 } else if xo == 588 { 2 } else { 4 };
+                            let index = (selector as usize) % (16 / width);
+                            let start = index * width;
+                            for offset in (0..16).step_by(width) {
+                                result[offset..offset + width].copy_from_slice(&b[start..start + width]);
+                            }
+                        }
+                    }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.vr[vd] = result;
