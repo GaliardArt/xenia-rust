@@ -2107,13 +2107,10 @@ impl PpcInterpreter {
                                     exact as u32
                                 };
                                 if saturating
-                                    && exact != value as i32 as i64
-                                    && (signed_a || signed_b)
-                                {
-                                    self.state.vscr |= 1 << 31;
-                                } else if saturating
-                                    && !(signed_a || signed_b)
-                                    && exact > u32::MAX as i64
+                                    && ((signed_a || signed_b)
+                                        && exact != value as i32 as i64
+                                        || !(signed_a || signed_b)
+                                            && exact > u32::MAX as i64)
                                 {
                                     self.state.vscr |= 1 << 31;
                                 }
