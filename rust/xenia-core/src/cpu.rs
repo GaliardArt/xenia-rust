@@ -9018,13 +9018,20 @@ mod tests {
         cpu.state.vr[3] = [0xFF; 16];
         cpu.state.vr[4] = [0xFF; 16];
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), u32::MAX);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            u32::MAX
+        );
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
 
         // vmsumshm: signed halfword products, modulo 2^32.
         cpu.state.pc = 0x1010;
-        cpu.state.vr[2] = [0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3];
-        cpu.state.vr[3] = [0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB];
+        cpu.state.vr[2] = [
+            0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3,
+        ];
+        cpu.state.vr[3] = [
+            0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB,
+        ];
         cpu.state.vr[4] = [0; 16];
         for lane in 0..4 {
             cpu.state.vr[4][lane * 4..lane * 4 + 4].copy_from_slice(&10_u32.to_be_bytes());
@@ -9046,7 +9053,10 @@ mod tests {
             0x36, 0x00,
         ]; // -1,000,000,000
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), i32::MIN as u32);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            i32::MIN as u32
+        );
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
     }
 }
