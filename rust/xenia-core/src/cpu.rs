@@ -3298,7 +3298,8 @@ impl PpcInterpreter {
                                         as i64;
                                     let accumulator = u32::from_be_bytes(
                                         b[lane * 4..lane * 4 + 4].try_into().unwrap(),
-                                    ) as i32 as i64;
+                                    ) as i32
+                                        as i64;
                                     let exact = first + second + accumulator;
                                     saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
                                     words[lane] =
