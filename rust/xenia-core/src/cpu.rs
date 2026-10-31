@@ -8889,8 +8889,7 @@ mod tests {
     }
 
     #[test]
-    fn vmx128_vector_store_does_not_partially_modify_memory_on_fault() {
-        let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x24);
+    fn vmx128_full_and_partial_vector_stores_are_atomic_on_fault() {
         let encode_memory = |selector: u32, vd: u32, ra: u32, rb: u32| {
             (4 << 26)
                 | ((vd & 0x1F) << 21)
@@ -8900,16 +8899,35 @@ mod tests {
                 | (selector & 3)
                 | (((vd >> 5) & 3) << 2)
         };
-        put_instruction(&mut memory, 0x2000, encode_memory(451, 0x65, 1, 2));
-        let mut cpu = fp_enabled_cpu();
-        cpu.state.pc = 0x2000;
-        cpu.state.gpr[1] = 0x2020;
-        cpu.state.gpr[2] = 0;
-        cpu.state.vr[0x65] = [0xA5; 16];
 
-        assert!(cpu.step(&mut memory).is_err());
-        assert_eq!(memory.read_bytes(GuestAddress(0x2020), 4), Ok(&[0; 4][..]));
-        assert_eq!(cpu.state.pc, 0x2000);
+        for (selector, address) in [
+            (451, 0x2020),  // stvx128
+            (963, 0x2020),  // stvxl128
+            (1283, 0x2021), // stvlx128
+            (1795, 0x2021), // stvlxl128
+            (1347, 0x2020), // stvrx128
+            (1859, 0x2020), // stvrxl128
+        ] {
+            let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x24);
+            put_instruction(
+                &mut memory,
+                0x2000,
+                encode_memory(selector, 0x65, 1, 2),
+            );
+            let mut cpu = fp_enabled_cpu();
+            cpu.state.pc = 0x2000;
+            cpu.state.gpr[1] = address;
+            cpu.state.gpr[2] = 0;
+            cpu.state.vr[0x65] = [0xA5; 16];
+
+            assert!(cpu.step(&mut memory).is_err(), "selector {selector}");
+            assert_eq!(
+                memory.read_bytes(GuestAddress(0x2020), 4),
+                Ok(&[0; 4][..]),
+                "selector {selector} partially changed guest RAM"
+            );
+            assert_eq!(cpu.state.pc, 0x2000);
+        }
     }
 
     #[test]
