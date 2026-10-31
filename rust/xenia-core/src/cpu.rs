@@ -2013,7 +2013,7 @@ impl PpcInterpreter {
                                 let bv = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
                                 let cv = i16::from_be_bytes([control[offset], control[offset + 1]]) as i32;
                                 let bias = if round { 0x4000 } else { 0 };
-                                let value = (av * bv + cv + bias) >> 15;
+                                let value = ((av * bv + bias) >> 15) + cv;
                                 let clamped = value.clamp(i16::MIN as i32, i16::MAX as i32);
                                 saturated |= value != clamped;
                                 result[offset..offset + 2].copy_from_slice(&(clamped as i16).to_be_bytes());
@@ -2056,7 +2056,14 @@ impl PpcInterpreter {
                                         sum += av * bv;
                                     }
                                 }
-                                let accumulator = u32::from_be_bytes(control[offset..offset + 4].try_into().unwrap()) as i32 as i64;
+                                let accumulator_raw = u32::from_be_bytes(
+                                    control[offset..offset + 4].try_into().unwrap(),
+                                );
+                                let accumulator = if signed_a || signed_b {
+                                    accumulator_raw as i32 as i64
+                                } else {
+                                    accumulator_raw as i64
+                                };
                                 let exact = sum + accumulator;
                                 let value = if saturating {
                                     let min = if signed_a || signed_b { i32::MIN as i64 } else { 0 };
