@@ -2356,10 +2356,7 @@ impl PpcInterpreter {
                                     lane + 4
                                 };
                                 let offset = source_lane * 2;
-                                let half = i16::from_be_bytes([
-                                    b[offset],
-                                    b[offset + 1],
-                                ]);
+                                let half = i16::from_be_bytes([b[offset], b[offset + 1]]);
                                 result[lane * 4..lane * 4 + 4]
                                     .copy_from_slice(&(half as i32).to_be_bytes());
                             }
