@@ -2113,6 +2113,11 @@ impl PpcInterpreter {
             }
             // Xenon VMX128 word permutation with an 8-bit immediate.
             6 => {
+                // The generated Xenia decoder identifies vpermwi128 by reserved selector bits.
+                let selector = (((instruction >> 9) & 0x3) << 5) | ((instruction >> 4) & 0x3);
+                if selector != 0b0100001 {
+                    return Err(PpcError::UnsupportedInstruction { pc, opcode });
+                }
                 // VX128_P has a distinct layout from the three-register VX128 format.
                 let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5))
                     as usize;
@@ -5190,6 +5195,8 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         let encode_vpermwi128 = |vd: u32, vb: u32, permutation: u32| {
             (6 << 26)
+                | (1 << 9)
+                | (1 << 4)
                 | ((vd & 0x1F) << 21)
                 | ((permutation & 0x1F) << 16)
                 | ((vb & 0x1F) << 11)
