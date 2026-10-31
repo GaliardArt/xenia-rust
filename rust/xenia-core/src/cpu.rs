@@ -3809,7 +3809,7 @@ impl PpcInterpreter {
                     let old = self.state.vr[registers.vd];
                     for lane in 0..4 {
                         let source_lane = (lane + rotate) & 3;
-                        let use_source = mask & (1 << (4 - lane)) != 0;
+                        let use_source = mask & (1 << (3 - lane)) != 0;
                         let start = lane * 4;
                         let source_start = source_lane * 4;
                         let selected = if use_source {
