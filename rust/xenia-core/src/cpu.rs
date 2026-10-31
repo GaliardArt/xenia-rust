@@ -8829,4 +8829,37 @@ mod tests {
             10
         );
     }
+    #[test]
+    fn vmx128_rotate_insert_uses_the_four_mask_bits_in_word_order() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let vd = 0x65_u32;
+        let vb = 0x43_u32;
+        let instruction = (6 << 26)
+            | ((vd & 0x1F) << 21)
+            | (0b1010 << 16)
+            | ((vb & 0x1F) << 11)
+            | (0b111 << 8)
+            | (1 << 6)
+            | (1 << 4)
+            | (((vd >> 5) & 3) << 2)
+            | ((vb >> 5) & 3);
+        put_instruction(&mut memory, 0x1000, instruction);
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[vd as usize] = [
+            0xA0, 0, 0, 0, 0xA1, 0, 0, 0, 0xA2, 0, 0, 0, 0xA3, 0, 0, 0,
+        ];
+        cpu.state.vr[vb as usize] = [
+            0xB0, 0, 0, 0, 0xB1, 0, 0, 0, 0xB2, 0, 0, 0, 0xB3, 0, 0, 0,
+        ];
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0xB1, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[vd as usize][4..8], &[0xA1, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0xB3, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[vd as usize][12..16], &[0xA3, 0, 0, 0]);
+    }
+
 }
