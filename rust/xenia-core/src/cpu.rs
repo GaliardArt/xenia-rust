@@ -50,8 +50,7 @@ fn round_shift_right_even(value: u32, shift: u32) -> u32 {
     let remainder_mask = (1_u32 << shift) - 1;
     let remainder = value & remainder_mask;
     let halfway = 1_u32 << (shift - 1);
-    truncated
-        + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
+    truncated + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
 }
 
 fn f32_to_f16_bits(value: f32) -> u16 {
@@ -2306,10 +2305,7 @@ impl PpcInterpreter {
                         }
                         1347 | 1859 => {
                             memory
-                                .write_bytes(
-                                    GuestAddress(aligned),
-                                    &vector[16 - offset..],
-                                )
+                                .write_bytes(GuestAddress(aligned), &vector[16 - offset..])
                                 .map_err(Into::into)?;
                         }
                         _ => unreachable!(),
@@ -7020,7 +7016,9 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x72] = std::array::from_fn(|i| i as u8);
         cpu.state.vr[0x43] = std::array::from_fn(|i| (0x80 + i) as u8);
-        cpu.state.vr[5] = [0x80, 0x8F, 16, 31, 1, 14, 17, 30, 2, 13, 18, 29, 3, 12, 19, 28];
+        cpu.state.vr[5] = [
+            0x80, 0x8F, 16, 31, 1, 14, 17, 30, 2, 13, 18, 29, 3, 12, 19, 28,
+        ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
@@ -8573,9 +8571,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[1],
-            [
-                0, 0, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3
-            ]
+            [0, 0, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3]
         );
     }
     #[test]
@@ -8817,8 +8813,7 @@ mod tests {
     #[test]
     fn vmx128_register_decoder_covers_all_128_register_indices() {
         for register in 0..128_u32 {
-            let vd_instruction =
-                ((register & 0x1F) << 21) | (((register >> 5) & 3) << 2);
+            let vd_instruction = ((register & 0x1F) << 21) | (((register >> 5) & 3) << 2);
             let vd = decode_vmx128_register_fields(vd_instruction);
             assert_eq!(vd.vd, register as usize);
 
@@ -8828,8 +8823,7 @@ mod tests {
             let va = decode_vmx128_register_fields(va_instruction);
             assert_eq!(va.va, register as usize);
 
-            let vb_instruction =
-                ((register & 0x1F) << 11) | ((register >> 5) & 3);
+            let vb_instruction = ((register & 0x1F) << 11) | ((register >> 5) & 3);
             let vb = decode_vmx128_register_fields(vb_instruction);
             assert_eq!(vb.vb, register as usize);
         }
@@ -8992,9 +8986,7 @@ mod tests {
     #[test]
     fn altivec_multiply_sum_families_preserve_signedness_and_saturation() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
-        let encode = |xo: u32| {
-            (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | xo
-        };
+        let encode = |xo: u32| (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | xo;
         for (index, xo) in [36_u32, 37, 38, 39, 40, 41].into_iter().enumerate() {
             put_instruction(&mut memory, 0x1000 + index as u64 * 4, encode(xo));
         }
@@ -9010,7 +9002,10 @@ mod tests {
             cpu.state.vr[4][lane * 4..lane * 4 + 4].copy_from_slice(&10_u32.to_be_bytes());
         }
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 50);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            50
+        );
 
         // vmsummbm: signed bytes from VA times unsigned bytes from VB.
         cpu.state.pc = 0x1004;
@@ -9018,14 +9013,20 @@ mod tests {
             0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4,
         ];
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 22);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            22
+        );
 
         // vmsumuhm: unsigned halfword products, modulo 2^32.
         cpu.state.pc = 0x1008;
         cpu.state.vr[2] = [0, 2, 0, 3, 0, 2, 0, 3, 0, 2, 0, 3, 0, 2, 0, 3];
         cpu.state.vr[3] = [0, 4, 0, 5, 0, 4, 0, 5, 0, 4, 0, 5, 0, 4, 0, 5];
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 33);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            33
+        );
 
         // vmsumuhs saturates an unsigned halfword sum to UINT32_MAX.
         cpu.state.pc = 0x100C;
@@ -9052,7 +9053,10 @@ mod tests {
             cpu.state.vr[4][lane * 4..lane * 4 + 4].copy_from_slice(&10_u32.to_be_bytes());
         }
         cpu.step(&mut memory).unwrap();
-        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), (-13_i32) as u32);
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            (-13_i32) as u32
+        );
 
         // vmsumshs saturates a signed halfword sum to INT32_MIN.
         cpu.state.pc = 0x1014;
