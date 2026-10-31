@@ -2919,7 +2919,8 @@ impl PpcInterpreter {
                                 let red = (pixel >> 19) & 0x1F;
                                 let green = (pixel >> 11) & 0x1F;
                                 let blue = (pixel >> 3) & 0x1F;
-                                let packed = ((alpha << 15) | (red << 10) | (green << 5) | blue) as u16;
+                                let packed =
+                                    ((alpha << 15) | (red << 10) | (green << 5) | blue) as u16;
                                 result[output..output + 2].copy_from_slice(&packed.to_be_bytes());
                                 output += 2;
                             }
@@ -2937,8 +2938,7 @@ impl PpcInterpreter {
                             let green = expand5((pixel >> 5) & 0x1F);
                             let blue = expand5(pixel & 0x1F);
                             let expanded = u32::from_be_bytes([alpha, red, green, blue]);
-                            result[lane * 4..lane * 4 + 4]
-                                .copy_from_slice(&expanded.to_be_bytes());
+                            result[lane * 4..lane * 4 + 4].copy_from_slice(&expanded.to_be_bytes());
                         }
                     }
                     // Signed byte/halfword unpack operations.
