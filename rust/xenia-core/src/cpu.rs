@@ -8811,6 +8811,45 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_register_decoder_covers_all_128_register_indices() {
+        for register in 0..128_u32 {
+            let vd_instruction =
+                ((register & 0x1F) << 21) | (((register >> 5) & 3) << 2);
+            let vd = decode_vmx128_register_fields(vd_instruction);
+            assert_eq!(vd.vd, register as usize);
+
+            let va_instruction = ((register & 0x1F) << 16)
+                | (((register >> 5) & 1) << 5)
+                | (((register >> 6) & 1) << 10);
+            let va = decode_vmx128_register_fields(va_instruction);
+            assert_eq!(va.va, register as usize);
+
+            let vb_instruction =
+                ((register & 0x1F) << 11) | ((register >> 5) & 3);
+            let vb = decode_vmx128_register_fields(vb_instruction);
+            assert_eq!(vb.vb, register as usize);
+        }
+    }
+
+    #[test]
+    fn binary16_round_trip_preserves_every_non_nan_encoding_and_quiets_signaling_nans() {
+        for bits in 0..=u16::MAX {
+            let exponent = bits & 0x7C00;
+            let fraction = bits & 0x03FF;
+            let expected = if exponent == 0x7C00 && fraction != 0 {
+                bits | 0x0200
+            } else {
+                bits
+            };
+            assert_eq!(
+                f32_to_f16_bits(f16_bits_to_f32(bits)),
+                expected,
+                "binary16 encoding {bits:#06x}"
+            );
+        }
+    }
+
+    #[test]
     fn vmx128_indexed_memory_load_store_and_alignment_masks_use_extended_registers() {
         let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x100);
         for index in 0..16 {
