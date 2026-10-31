@@ -105,6 +105,48 @@ fn f32_to_f16_bits(value: f32) -> u16 {
         }
     }
 }
+fn f32_to_f16_bits_toward_zero(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exponent = ((bits >> 23) & 0xFF) as i32;
+    let fraction = bits & 0x007F_FFFF;
+
+    if exponent == 0xFF {
+        if fraction == 0 {
+            return sign | 0x7C00;
+        }
+        let payload = ((fraction >> 13) as u16) | 0x0200;
+        return sign | 0x7C00 | payload;
+    }
+
+    let unbiased_exponent = if exponent == 0 { -126 } else { exponent - 127 };
+    let significand = if exponent == 0 {
+        fraction
+    } else {
+        fraction | 0x0080_0000
+    };
+
+    if unbiased_exponent > 15 {
+        return sign | 0x7BFF;
+    }
+
+    if unbiased_exponent >= -14 {
+        let half_exponent = (unbiased_exponent + 15) as u16;
+        sign | (half_exponent << 10) | ((fraction >> 13) as u16)
+    } else {
+        let shift = (-unbiased_exponent - 1) as u32;
+        if shift >= 32 {
+            return sign;
+        }
+        let truncated = significand >> shift;
+        if truncated >= 0x400 {
+            sign | 0x0400
+        } else {
+            sign | truncated as u16
+        }
+    }
+}
+
 fn f16_bits_to_f32(bits: u16) -> f32 {
     let sign = ((bits as u32) & 0x8000) << 16;
     let exponent = ((bits >> 10) & 0x1F) as u32;
@@ -3880,7 +3922,7 @@ impl PpcInterpreter {
                         3 => {
                             for lane in 0..2 {
                                 packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&f32_to_f16_bits(floats[lane]).to_be_bytes());
+                                    .copy_from_slice(&f32_to_f16_bits_toward_zero(floats[lane]).to_be_bytes());
                             }
                             4
                         }
@@ -3911,15 +3953,34 @@ impl PpcInterpreter {
                     let mut output = old;
                     let shift = ((instruction >> 6) & 3) as usize;
                     match pack_mode {
-                        0 => output = packed,
+                        0 => {}
                         1 => {
-                            let offset = shift * 4;
-                            output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                            let offset = (3 - shift) * 4;
+                            output[offset..offset + 4]
+                                .copy_from_slice(&packed[packed_len - 4..packed_len]);
                         }
-                        2 | 3 => {
-                            let offset = (shift & 1) * 8;
-                            let count = packed_len.min(8);
-                            output[offset..offset + count].copy_from_slice(&packed[..count]);
+                        2 => {
+                            if packed_len == 4 {
+                                let lane = 3 - shift.min(2);
+                                let offset = lane * 4;
+                                output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                            } else {
+                                let offset = [8, 4, 0, 0][shift];
+                                output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                            }
+                        }
+                        3 => {
+                            if packed_len == 4 {
+                                if shift != 3 {
+                                    let offset = (3 - shift) * 4;
+                                    output[offset..offset + 4].copy_from_slice(&packed[..4]);
+                                }
+                            } else if shift == 3 {
+                                output[12..16].copy_from_slice(&packed[..4]);
+                            } else {
+                                let offset = [8, 4, 0][shift];
+                                output[offset..offset + 8].copy_from_slice(&packed[..8]);
+                            }
                         }
                         _ => unreachable!(),
                     }
