@@ -1996,6 +1996,49 @@ impl PpcInterpreter {
                 let a = self.state.vr[va];
                 let b = self.state.vr[vb];
                 let mut result = [0_u8; 16];
+
+                // VA-format AltiVec operations carry a fourth vector operand
+                // or an immediate in bits 6..10.
+                let va_operation = instruction & 0x3F;
+                if matches!(va_operation, 42 | 43 | 44 | 46 | 47) {
+                    let vc = ((instruction >> 6) & 0x1F) as usize;
+                    let control = self.state.vr[vc];
+                    match va_operation {
+                        42 => {
+                            for lane in 0..16 {
+                                result[lane] = (a[lane] & !control[lane]) | (b[lane] & control[lane]);
+                            }
+                        }
+                        43 => {
+                            for lane in 0..16 {
+                                let selector = (control[lane] & 0x1F) as usize;
+                                result[lane] = if selector < 16 { a[selector] } else { b[selector - 16] };
+                            }
+                        }
+                        44 => {
+                            let shift = (vc & 0xF) as usize;
+                            let mut joined = [0_u8; 32];
+                            joined[..16].copy_from_slice(&a);
+                            joined[16..].copy_from_slice(&b);
+                            result.copy_from_slice(&joined[shift..shift + 16]);
+                        }
+                        46 | 47 => {
+                            for lane in 0..4 {
+                                let offset = lane * 4;
+                                let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
+                                let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
+                                let cv = f32::from_bits(u32::from_be_bytes(control[offset..offset + 4].try_into().unwrap()));
+                                let value = if va_operation == 46 { av.mul_add(cv, bv) } else { bv - av * cv };
+                                result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                    self.state.vr[vd] = result;
+                    self.state.pc = next_pc;
+                    return Ok(());
+                }
+
                 match xo {
                     0x000 => {
                         for lane in 0..16 {
