@@ -9063,8 +9063,14 @@ mod tests {
         assert_eq!(f32_to_f16_bits_toward_zero(1.0007), 0x3C00);
         assert_eq!(f32_to_f16_bits_toward_zero(-1.0007), 0xBC00);
         assert_eq!(f32_to_f16_bits_toward_zero(65_520.0), 0x7BFF);
-        assert_eq!(f32_to_f16_bits_toward_zero(f32::from_bits(0x3380_0000)), 0x0001);
-        assert_eq!(f32_to_f16_bits_toward_zero(f32::from_bits(0x3300_0000)), 0x0000);
+        assert_eq!(
+            f32_to_f16_bits_toward_zero(f32::from_bits(0x3380_0000)),
+            0x0001
+        );
+        assert_eq!(
+            f32_to_f16_bits_toward_zero(f32::from_bits(0x3300_0000)),
+            0x0000
+        );
     }
 
     #[test]
