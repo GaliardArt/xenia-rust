@@ -8860,9 +8860,9 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0xB1, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0, 0, 0, 0xB0]);
         assert_eq!(&cpu.state.vr[vd as usize][4..8], &[0xA1, 0, 0, 0]);
-        assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0xB3, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0, 0, 0, 0xB2]);
         assert_eq!(&cpu.state.vr[vd as usize][12..16], &[0xA3, 0, 0, 0]);
     }
 }
