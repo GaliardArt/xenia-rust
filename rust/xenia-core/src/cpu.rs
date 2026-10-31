@@ -2374,7 +2374,7 @@ impl PpcInterpreter {
                         }
                     }
                     _ => match compare_operation {
-                        0b000000 | 0b000010 | 0b000100 | 0b000110 | 0b100000 => {
+                        0b000000 | 0b001000 | 0b010000 | 0b011000 | 0b100000 => {
                             let mut all_true = true;
                             let mut all_false = true;
                             for lane in 0..4 {
@@ -2385,7 +2385,7 @@ impl PpcInterpreter {
                                     u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                                 let af = f32::from_bits(av);
                                 let bf = f32::from_bits(bv);
-                                let (mask, condition) = if compare_operation == 0b000110 {
+                                let (mask, condition) = if compare_operation == 0b011000 {
                                     let above_upper = af > bf;
                                     let below_lower = !(af >= -bf);
                                     let mask = (if above_upper { 0x8000_0000 } else { 0 })
@@ -2394,8 +2394,8 @@ impl PpcInterpreter {
                                 } else {
                                     let condition = match compare_operation {
                                         0b000000 => af == bf,
-                                        0b000010 => af >= bf,
-                                        0b000100 => af > bf,
+                                        0b001000 => af >= bf,
+                                        0b010000 => af > bf,
                                         0b100000 => av == bv,
                                         _ => unreachable!(),
                                     };
@@ -5454,7 +5454,7 @@ mod tests {
 
     #[test]
     fn vmx128_word_shifts_and_comparisons_execute_on_extended_registers() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_shift = |vd: u32, va: u32, vb: u32, operation: u32| {
             (6 << 26)
                 | ((vd & 0x1F) << 21)
@@ -5494,6 +5494,11 @@ mod tests {
             0x1008,
             encode_compare(0x7D, 0x72, 0x43, 0b100000),
         );
+        put_instruction(
+            &mut memory,
+            0x100C,
+            encode_compare(0x7D, 0x72, 0x43, 0b001000) | (1 << 6),
+        );
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x72] = [
@@ -5519,6 +5524,34 @@ mod tests {
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF
             ]
         );
+
+        cpu.state.vr[0x72] = [
+            1.0_f32.to_bits().to_be_bytes(),
+            2.0_f32.to_bits().to_be_bytes(),
+            3.0_f32.to_bits().to_be_bytes(),
+            4.0_f32.to_bits().to_be_bytes(),
+        ]
+        .concat()
+        .try_into()
+        .unwrap();
+        cpu.state.vr[0x43] = [
+            1.0_f32.to_bits().to_be_bytes(),
+            3.0_f32.to_bits().to_be_bytes(),
+            2.0_f32.to_bits().to_be_bytes(),
+            4.0_f32.to_bits().to_be_bytes(),
+        ]
+        .concat()
+        .try_into()
+        .unwrap();
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF
+            ]
+        );
+        assert_eq!(cpu.state.cr[6], 0b0100);
     }
 
     #[test]
