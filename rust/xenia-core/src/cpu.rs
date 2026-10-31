@@ -2171,13 +2171,13 @@ impl PpcInterpreter {
                     }
                     0b111001 | 0b111101 => {
                         let shift = (b[15] & 0x78) >> 3;
-                        for lane in 0..16 {
+                        for (lane, output) in result.iter_mut().enumerate() {
                             let source_lane = if operation == 0b111001 {
                                 lane + shift as usize
                             } else {
                                 lane.checked_sub(shift as usize).unwrap_or(usize::MAX)
                             };
-                            result[lane] = if source_lane < 16 { a[source_lane] } else { 0 };
+                            *output = if source_lane < 16 { a[source_lane] } else { 0 };
                         }
                     }
                     // Saturating and modulo pack operations.
