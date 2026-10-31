@@ -9028,6 +9028,90 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_d3d_pack_unpack_formats_follow_encoded_float_contract() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 56);
+        let encode_pack = |vd: u32, vb: u32, pack_type: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | (((pack_type << 2) | 2) << 16)
+                | ((vb & 0x1F) << 11)
+                | (6 << 8)
+                | (1 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        let encode_unpack = |vd: u32, vb: u32, pack_type: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((pack_type << 2) << 16)
+                | ((vb & 0x1F) << 11)
+                | (0b1111111 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        let cases: [([u32; 4], [u32; 4]); 7] = [
+            (
+                [0x4040_0020, 0x4040_0030, 0x4040_0040, 0x4040_0010],
+                [0x3F80_0020, 0x3F80_0030, 0x3F80_0040, 0x3F80_0010],
+            ),
+            (
+                [0x4040_0002, 0x403F_FFFE, 0, 0],
+                [0x4040_0002, 0x403F_FFFE, 0, 0x3F80_0000],
+            ),
+            (
+                [0x4040_0003, 0x403F_FFFF, 0x4040_0100, 0x4040_0002],
+                [0x4040_0003, 0x403F_FFFF, 0x4040_0100, 0x3F80_0002],
+            ),
+            (
+                [1.0007_f32.to_bits(), (-1.0007_f32).to_bits(), 0, 0x3F80_0000],
+                [0x3F80_0000, 0xBF80_0000, 0, 0x3F80_0000],
+            ),
+            (
+                [0x4040_0002, 0x403F_FFFE, 0x4040_0003, 0x403F_FFFD],
+                [0x4040_0002, 0x403F_FFFE, 0x4040_0003, 0x403F_FFFD],
+            ),
+            (
+                [0x3F80_0000, 0xC000_0000, 0x3F00_0000, 0x4080_0000],
+                [0x3F80_0000, 0xC000_0000, 0x3F00_0000, 0x4080_0000],
+            ),
+            (
+                [0x4040_0003, 0x403F_FFFF, 0x4040_0100, 0x4040_000A],
+                [0x4040_0003, 0x403F_FFFF, 0x4040_0100, 0x3F80_000A],
+            ),
+        ];
+        for (pack_type, _) in cases.iter().enumerate() {
+            let address = 0x1000 + pack_type as u32 * 8;
+            put_instruction(
+                &mut memory,
+                address,
+                encode_pack(0x46, 0x25, pack_type as u32),
+            );
+            put_instruction(
+                &mut memory,
+                address + 4,
+                encode_unpack(0x47, 0x46, pack_type as u32),
+            );
+        }
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        for (pack_type, (input, expected)) in cases.into_iter().enumerate() {
+            for lane in 0..4 {
+                cpu.state.vr[0x25][lane * 4..lane * 4 + 4]
+                    .copy_from_slice(&input[lane].to_be_bytes());
+            }
+            cpu.step(&mut memory).unwrap();
+            cpu.step(&mut memory).unwrap();
+            let mut expected_bytes = [0; 16];
+            for lane in 0..4 {
+                expected_bytes[lane * 4..lane * 4 + 4]
+                    .copy_from_slice(&expected[lane].to_be_bytes());
+            }
+            assert_eq!(cpu.state.vr[0x47], expected_bytes, "D3D pack type {pack_type}");
+        }
+    }
+
+    #[test]
     fn vmx128_d3d_half_pack_unpack_and_rotate_insert_execute() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_pack = |vd: u32, vb: u32, immediate: u32, shift: u32| {
