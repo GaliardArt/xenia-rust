@@ -34,8 +34,74 @@ architectural conformance.
 | Integer memory | lbz/lhz/lha/stb/sth/lwz/stw; D-form update loads/stores; indexed byte/halfword/word forms and updates; lmw/stmw | string operations, byte-reverse, reservation/conditional, DS-form, integer 64-bit loads/stores, alignment exceptions, and complete store-range atomicity are absent. |
 | Scalar FP memory | lfs/lfd/stfs/stfd and indexed forms | FPSCR effects, NaN payloads, denormal/rounding behavior, precise FP exceptions and atomic 64-bit memory access need work. |
 | Scalar FP execution | fadd/fadds, fsub/fsubs, fdiv/fdivs, fmul/fmuls, fsel, fsqrt/fsqrts, fres, frsqrte, fmadd/fmsub/fnmadd/fnmsub and single variants; fabs/fmr/fnabs/fneg/frsp; fctiw/fctiwz/fctid/fctidz/fcfid; fcmpu/fcmpo; mcrfs/mffs/mtfsb0/mtfsb1/mtfsf/mtfsfi | FPSCR core status, FPRF, field moves, sticky summaries, invalid subcauses, conversion rounding, and single-result directed rounding are implemented. Exact binary64 directed rounding, full FR behavior, precise exception delivery, NaN payload fidelity, and hardware reciprocal estimates remain incomplete. |
-| VMX/AltiVec | selected byte/halfword/word add/sub and basic logical operations; aligned vector load/store | most VMX instructions absent: compares, saturation, permute, pack/unpack, shifts, floating-point vector ops, VSCR semantics, and Xenon VMX128 encodings/register operands. |
+| VMX/AltiVec + Xenon VMX128 | The current dispatch has substantial classic VMX coverage: wrapping and saturating lane arithmetic, carry/borrow, averages, min/max, multiply/widen, multiply-sum, compares, shifts/rotates, splats, merges, packs/unpacks, vector FP arithmetic/conversions/estimates, permute/select, VSCR transfers, and a subset of vector memory operations. VMX128 paths exist under primary opcodes 4, 5, and 6, including 7-bit register reconstruction, byte permute, selected FP/integer arithmetic, pack/unpack and D3D conversions, plus indexed memory forms. | This is not yet a complete VMX/VMX128 implementation. Many reference-table entries remain absent or not proven connected to the correct decoder selector. Classic partial element loads/stores (lvebx/lvehx/lvlx/lvrx and store-left/right families), additional multiply/merge/sum variants, and multiple VMX128 operations (including word/byte shift variants, comparisons, floating estimates/rounding and other special forms) need exact per-mnemonic auditing. Vector memory operations currently use byte-at-a-time accesses in several paths, so a later fault can leave a partially modified destination or memory. VSCR behavior, NaN/rounding edge cases, record forms, and all register/immediate field encodings still require differential validation. |
 | Exceptions | memory errors and unsupported-opcode errors surface to caller | no architectural program/data/alignment/FPU exceptions, interrupt state, exception vectors, or precise fault/retirement model. |
+
+## VMX/AltiVec and Xenon VMX128 focused audit (2026-10-31)
+
+The reference Xenia opcode table at `src/xenia/cpu/ppc/ppc_opcode_table_gen.cc`
+contains **233 VMX/VMX128-related instruction entries** when classic vector
+memory, VMX arithmetic, and VMX128 forms are counted together. This is the
+reference inventory size, **not** a Rust coverage percentage: aliases, encoding
+formats, record variants, and the distinction between classic VMX and Xenon
+VMX128 must be resolved per entry before a denominator is meaningful.
+
+### Confirmed Rust dispatch families from source inspection
+
+- **Classic VMX integer:** byte/halfword/word wrapping add/subtract; saturating
+  add/subtract; carry/borrow; rounded averages; signed/unsigned min/max;
+  widening even/odd multiply; six multiply-sum forms; lane comparisons;
+  shifts/rotates; immediate and indexed splats; merges; pack/unpack; and
+  integer/FP conversion families.
+- **Classic VMX floating point:** add/subtract, reciprocal and reciprocal-square-
+  root estimates, exponent/log estimates, rounding operations, min/max, and
+  selected fused multiply-add/subtract forms.
+- **Classic VMX rearrangement/state:** permute, select, shift-left-double-octet,
+  VSCR read/write, and SAT updates in selected saturating paths.
+- **Classic vector memory:** aligned indexed vector load/store and some element
+  memory forms. This does not establish full coverage of all classic partial
+  left/right and element load/store instructions.
+- **VMX128 register/encoding support:** a 128-entry vector register file and
+  split high-bit reconstruction; dedicated primary-opcode paths for VMX128
+  memory, arithmetic, conversions, byte permutation, word permutation immediate,
+  and selected pack/unpack operations.
+- **VMX128 floating point/integer:** selected binary32 arithmetic, fused
+  operations, dot/multiply-sum forms, logical operations, select, byte shifts,
+  saturating/modulo pack operations, conversion/rounding/estimate unary forms,
+  and D3D packed vertex conversions.
+
+### Confirmed gaps and risks (do not count as implemented)
+
+1. The reference table has many classic instructions that are not represented by
+   an obvious current dispatch arm, including several element/partial vector
+   memory forms and selected multiply, merge, unpack, and sum operations.
+2. VMX128 is split across distinct VX128 formats (VX128_1 through VX128_5 and
+   predicate/permutation forms). A generic 7-bit register decoder does not by
+   itself prove that each instruction's selector and immediate fields are
+   decoded correctly.
+3. Some vector memory paths issue multiple byte reads/writes and update state
+   incrementally. A fault late in the operation can therefore expose partial
+   architectural effects; transactional vector memory semantics are not yet
+   established.
+4. Floating-point host operations and estimates are not a differential oracle.
+   NaN payloads, signed zero, subnormals, rounding, fused behavior, and exception
+   flags need explicit reference vectors.
+5. Existing unit tests cover representative paths and exhaustive VMX128 register
+   indices, but do not yet constitute one test per reference-table instruction,
+   all encoding variants, or a differential suite against Xenia/Xenon behavior.
+
+### Evidence levels used for this family
+
+- **Present in dispatch:** an opcode/selector path exists in `cpu.rs`.
+- **Unit-tested in source:** a Rust test exists; this does not mean it has run.
+- **Executed locally/CI:** test execution is confirmed by an actual run record.
+- **Differentially validated:** outputs and side effects match a trusted reference
+  for deterministic vectors.
+
+As of this audit, the repository HEAD is
+`97484a7e8a645cdea356765a3576f104078c1a2a`. GitHub reports no status checks
+and no associated workflow runs for that commit. Therefore no claim is made
+here that the current VMX tests passed in CI or were executed locally.
 
 ## Correctness risks found during inspection
 
