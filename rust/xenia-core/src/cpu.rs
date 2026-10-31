@@ -5115,7 +5115,7 @@ mod tests {
 
     #[test]
     fn vmx128_logical_instructions_execute_with_extended_register_indices() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
         let encode_vmx128 = |vd: u32, va: u32, vb: u32, operation: u32| {
             (5 << 26)
                 | ((vd & 0x1F) << 21)
@@ -5128,34 +5128,41 @@ mod tests {
                 | (((operation >> 1) & 0xF) << 6)
                 | ((operation & 0x1) << 4)
         };
-        // vand128 v125,v114,v67
-        put_instruction(
-            &mut memory,
-            0x1000,
-            encode_vmx128(0x7D, 0x72, 0x43, 0b100001),
-        );
+        let operations = [0b100001, 0b100101, 0b101001, 0b101101, 0b110001];
+        for (index, operation) in operations.into_iter().enumerate() {
+            put_instruction(
+                &mut memory,
+                0x1000 + (index as u32 * 4),
+                encode_vmx128(0x7D, 0x72, 0x43, operation),
+            );
+        }
 
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
-        cpu.state.vr[0x72] = [
+        let a = [
             0xF0, 0x0F, 0xAA, 0x55, 0xFF, 0x00, 0x81, 0x18, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
             0xDE, 0xF0,
         ];
-        cpu.state.vr[0x43] = [
+        let b = [
             0x0F, 0xF0, 0x0F, 0xF0, 0x55, 0xAA, 0x18, 0x81, 0xFF, 0x0F, 0xF0, 0xAA, 0x55, 0x33,
             0xCC, 0x0F,
         ];
+        cpu.state.vr[0x72] = a;
+        cpu.state.vr[0x43] = b;
 
-        cpu.step(&mut memory).unwrap();
-
-        assert_eq!(
-            cpu.state.vr[0x7D],
-            [
-                0x00, 0x00, 0x0A, 0x50, 0x55, 0x00, 0x00, 0x00, 0x12, 0x04, 0x50, 0x28, 0x10, 0x30,
-                0xCC, 0x00,
-            ]
-        );
-        assert_eq!(cpu.state.pc, 0x1004);
+        for (index, operation) in operations.into_iter().enumerate() {
+            cpu.step(&mut memory).unwrap();
+            let expected = std::array::from_fn(|lane| match operation {
+                0b100001 => a[lane] & b[lane],
+                0b100101 => a[lane] & !b[lane],
+                0b101001 => !(a[lane] | b[lane]),
+                0b101101 => a[lane] | b[lane],
+                0b110001 => a[lane] ^ b[lane],
+                _ => unreachable!(),
+            });
+            assert_eq!(cpu.state.vr[0x7D], expected, "operation {operation:#08b}");
+            assert_eq!(cpu.state.pc, 0x1004 + index as u32 * 4);
+        }
     }
 
     #[test]
