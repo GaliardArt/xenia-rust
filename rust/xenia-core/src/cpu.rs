@@ -2232,7 +2232,7 @@ impl PpcInterpreter {
                 let a = self.state.vr[registers.va];
                 let b = self.state.vr[registers.vb];
                 let shift_operation = (((instruction >> 6) & 0xF) << 2) | ((instruction >> 4) & 1);
-                let compare_operation = (((instruction >> 7) & 0x7) << 1) | ((instruction >> 4) & 1);
+                let compare_operation = (((instruction >> 7) & 0x7) << 3) | ((instruction >> 4) & 1);
                 let mut result = [0_u8; 16];
 
                 match shift_operation {
@@ -5361,7 +5361,7 @@ mod tests {
                 | (((va >> 5) & 1) << 5)
                 | (((va >> 6) & 1) << 10)
                 | ((vb >> 5) & 3)
-                | (((operation >> 1) & 7) << 7)
+                | (((operation >> 3) & 7) << 7)
                 | ((operation & 1) << 4)
         };
         put_instruction(&mut memory, 0x1000, encode_shift(0x7D, 0x72, 0x43, 0b001101));
@@ -5373,7 +5373,7 @@ mod tests {
             0x80, 0, 0, 1, 0x80, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 4,
         ];
         cpu.state.vr[0x43] = [
-            0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1,
+            0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4,
         ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
@@ -5437,8 +5437,8 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0x7F, 0x7F, 0xFF, 0x80, 0x01, 0x7F, 0x7F, 0x7F,
-             0, 2, 3, 4, 5, 6, 7, 7]
+            [0x7F, 0x80, 0x01, 0xFF, 0x02, 0x03, 0x04, 0x05,
+             0x7F, 0x7F, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]
         );
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
     }
