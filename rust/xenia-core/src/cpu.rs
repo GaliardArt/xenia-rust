@@ -5236,17 +5236,20 @@ mod tests {
         cpu.state.pc = 0x1000;
         let source = std::array::from_fn(|index| index as u8);
         cpu.state.vr[0x72] = source;
-        cpu.state.vr[0x43] = [0; 15].into_iter().chain([0x10]).collect::<Vec<_>>().try_into().unwrap();
+        cpu.state.vr[0x43] = [0; 16];
+        cpu.state.vr[0x43][15] = 0x10;
 
-        cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.vr[0x7D], [0; 16]);
-
-        cpu.state.vr[0x43][15] = 0x08;
-        cpu.state.pc = 0x1004;
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0]
+        );
+
+        cpu.state.vr[0x43][15] = 0x08;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
         assert_eq!(cpu.state.pc, 0x1008);
     }
