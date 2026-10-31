@@ -35,6 +35,7 @@ pub fn decode_vmx128_register_fields(instruction: u32) -> Vmx128RegisterFields {
     }
 }
 
+#[cfg(test)]
 fn round_shift_right_even(value: u32, shift: u32) -> u32 {
     if shift == 0 {
         return value;
@@ -53,6 +54,7 @@ fn round_shift_right_even(value: u32, shift: u32) -> u32 {
     truncated + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
 }
 
+#[cfg(test)]
 fn f32_to_f16_bits(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
@@ -9101,9 +9103,9 @@ mod tests {
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         for (pack_type, (input, expected)) in cases.into_iter().enumerate() {
-            for lane in 0..4 {
+            for (lane, bits) in input.iter().copied().enumerate() {
                 cpu.state.vr[0x25][lane * 4..lane * 4 + 4]
-                    .copy_from_slice(&input[lane].to_be_bytes());
+                    .copy_from_slice(&bits.to_be_bytes());
             }
             cpu.step(&mut memory).unwrap();
             cpu.step(&mut memory).unwrap();
