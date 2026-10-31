@@ -2127,6 +2127,39 @@ impl PpcInterpreter {
                             result[lane] = !(a[lane] | b[lane]);
                         }
                     }
+                    12 | 76 | 140 | 268 | 332 | 396 => {
+                        let width = if matches!(xo, 12 | 268) { 1 } else if matches!(xo, 76 | 332) { 2 } else { 4 };
+                        let high = matches!(xo, 12 | 76 | 140);
+                        let half = 8 / width;
+                        let first = if high { 0 } else { half };
+                        for lane in 0..half {
+                            let src = (first + lane) * width;
+                            let out_a = lane * 2 * width;
+                            let out_b = out_a + width;
+                            result[out_a..out_a + width].copy_from_slice(&a[src..src + width]);
+                            result[out_b..out_b + width].copy_from_slice(&b[src..src + width]);
+                        }
+                    }
+                    1036 | 1100 => {
+                        let shift = ((b[15] & 0x78) >> 3) as usize;
+                        if xo == 1036 {
+                            result[..16 - shift].copy_from_slice(&a[shift..]);
+                        } else {
+                            result[shift..].copy_from_slice(&a[..16 - shift]);
+                        }
+                    }
+                    452 | 708 => {
+                        let shift = (b[15] & 7) as u32;
+                        let value = u128::from_be_bytes(a);
+                        let shifted = if xo == 452 { value.wrapping_shl(shift) } else { value.wrapping_shr(shift) };
+                        result.copy_from_slice(&shifted.to_be_bytes());
+                    }
+                    1540 => {
+                        result[12..16].copy_from_slice(&self.state.vscr.to_be_bytes());
+                    }
+                    1604 => {
+                        self.state.vscr = u32::from_be_bytes(b[12..16].try_into().unwrap());
+                    }
                     // AltiVec lane-wise min/max operations.
                     2 | 66 | 130 | 258 | 322 | 386 | 514 | 578 | 642 | 770 | 834 | 898 => {
                         let width = if matches!(xo, 2 | 258 | 514 | 770) {
