@@ -2169,7 +2169,7 @@ impl PpcInterpreter {
                         | 1347 | 1539 | 1603 | 1795 | 1859
                 ) {
                     let vd = (((instruction >> 21) & 0x1F)
-                        | (((instruction >> 24) & 0x3) << 5)) as usize;
+                        | (((instruction >> 2) & 0x3) << 5)) as usize;
                     let ra = ((instruction >> 16) & 0x1F) as usize;
                     let rb = ((instruction >> 11) & 0x1F) as usize;
                     let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
@@ -8713,5 +8713,78 @@ mod tests {
         assert_eq!(f16_bits_to_f32(0xC000), -2.0);
         assert_eq!(f16_bits_to_f32(0x0001), 2.0_f32.powi(-24));
         assert!(f16_bits_to_f32(0x7E00).is_nan());
+    } 
+    #[test]
+    fn vmx128_indexed_memory_load_store_and_alignment_masks_use_extended_registers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x100);
+        for index in 0..16 {
+            memory.write_u8(GuestAddress(0x2040 + index), index as u8).unwrap();
+        }
+        let encode_memory = |selector: u32, vd: u32, ra: u32, rb: u32| {
+            (4 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((ra & 0x1F) << 16)
+                | ((rb & 0x1F) << 11)
+                | (((selector >> 2) & 0x7F) << 4)
+                | (selector & 3)
+                | (((vd >> 5) & 3) << 2)
+        };
+        put_instruction(&mut memory, 0x2000, encode_memory(195, 0x65, 1, 2)); // lvx128
+        put_instruction(&mut memory, 0x2004, encode_memory(67, 0x66, 1, 2)); // lvsr128
+        put_instruction(&mut memory, 0x2008, encode_memory(451, 0x65, 1, 3)); // stvx128
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x2000;
+        cpu.state.gpr[1] = 0x2040;
+        cpu.state.gpr[2] = 3;
+        cpu.state.gpr[3] = 0x2050;
+
+        for _ in 0..3 {
+            cpu.step(&mut memory).unwrap();
+        }
+
+        assert_eq!(cpu.state.vr[0x65], core::array::from_fn(|i| i as u8));
+        assert_eq!(cpu.state.vr[0x66], core::array::from_fn(|i| (13 + i) as u8));
+        for index in 0..16 {
+            assert_eq!(memory.read_u8(GuestAddress(0x2050 + index)), Ok(index as u8));
+        }
     }
+
+    #[test]
+    fn altivec_partial_sum_instructions_saturate_and_set_vscr_sat() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode(1, 2, 3, 1544)); // vsum4ubs
+        put_instruction(&mut memory, 0x1004, encode(1, 2, 3, 1672)); // vsum2sws
+        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 1928)); // vsumsws
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [255; 16];
+        cpu.state.vr[3] = [0xFF; 16];
+        cpu.state.vr[3][12..16].copy_from_slice(&1_u32.to_be_bytes());
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()),
+            u32::MAX
+        );
+        assert_ne!(cpu.state.vscr & (1 << 31), 0);
+
+        cpu.state.vr[2] = [
+            0, 0, 0, 1, 0, 0, 0, 2,
+            0, 0, 0, 3, 0, 0, 0, 4,
+        ];
+        cpu.state.vr[3] = [0; 16];
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][4..8].try_into().unwrap()), 3);
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()), 7);
+
+        cpu.state.pc = 0x1008;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1][..12], [0; 12]);
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][12..16].try_into().unwrap()), 10);
+    }
+
 }
