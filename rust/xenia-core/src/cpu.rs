@@ -2209,16 +2209,16 @@ impl PpcInterpreter {
                             self.state.vr[vd] = vector;
                         }
                         131 | 195 | 707 => {
-                            for lane in 0..16 {
-                                vector[lane] = memory
+                            for (lane, byte) in vector.iter_mut().enumerate() {
+                                *byte = memory
                                     .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
                                     .map_err(Into::into)?;
                             }
                             self.state.vr[vd] = vector;
                         }
                         1027 | 1539 => {
-                            for lane in 0..16 {
-                                vector[lane] = if lane + offset < 16 {
+                            for (lane, byte) in vector.iter_mut().enumerate() {
+                                *byte = if lane + offset < 16 {
                                     memory
                                         .read_u8(GuestAddress(
                                             aligned.wrapping_add((lane + offset) as u32),
@@ -2254,31 +2254,31 @@ impl PpcInterpreter {
                             self.state.vr[vd] = vector;
                         }
                         451 | 963 => {
-                            for lane in 0..16 {
+                            for (lane, byte) in vector.iter().enumerate() {
                                 memory
                                     .write_u8(
                                         GuestAddress(aligned.wrapping_add(lane as u32)),
-                                        vector[lane],
+                                        *byte,
                                     )
                                     .map_err(Into::into)?;
                             }
                         }
                         1283 | 1795 => {
-                            for lane in offset..16 {
+                            for (lane, byte) in vector[..16 - offset].iter().enumerate() {
                                 memory
                                     .write_u8(
-                                        GuestAddress(aligned.wrapping_add(lane as u32)),
-                                        vector[lane - offset],
+                                        GuestAddress(aligned.wrapping_add((offset + lane) as u32)),
+                                        *byte,
                                     )
                                     .map_err(Into::into)?;
                             }
                         }
                         1347 | 1859 => {
-                            for lane in 0..offset {
+                            for (lane, byte) in vector[16 - offset..].iter().enumerate() {
                                 memory
                                     .write_u8(
                                         GuestAddress(aligned.wrapping_add(lane as u32)),
-                                        vector[16 - offset + lane],
+                                        *byte,
                                     )
                                     .map_err(Into::into)?;
                             }
@@ -3250,7 +3250,7 @@ impl PpcInterpreter {
                         let mut words = [0_u32; 4];
                         match xo {
                             1544 | 1800 => {
-                                for lane in 0..4 {
+                                for (lane, word) in words.iter_mut().enumerate() {
                                     let offset = lane * 4;
                                     let mut sum = 0_i64;
                                     for item in 0..4 {
@@ -3275,7 +3275,7 @@ impl PpcInterpreter {
                                         (i32::MIN as i64, i32::MAX as i64)
                                     };
                                     saturated |= exact < min || exact > max;
-                                    words[lane] = exact.clamp(min, max) as u32;
+                                    *word = exact.clamp(min, max) as u32;
                                 }
                             }
                             1608 => {
@@ -3291,7 +3291,7 @@ impl PpcInterpreter {
                                         as i64;
                                     let exact = first + second + accumulator;
                                     saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
-                                    words[lane] =
+                                    *word =
                                         exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
                                 }
                             }
@@ -3598,19 +3598,19 @@ impl PpcInterpreter {
                         }
                         4 => {
                             let mut lanes = [0.0; 4];
-                            for lane in 0..4 {
+                            for (lane, value) in lanes.iter_mut().enumerate() {
                                 let offset = lane * 2;
-                                let value = i16::from_be_bytes([b[offset], b[offset + 1]]) as f32;
-                                lanes[lane] = (value / 32767.0).max(-1.0);
+                                let raw = i16::from_be_bytes([b[offset], b[offset + 1]]) as f32;
+                                *value = (raw / 32767.0).max(-1.0);
                             }
                             lanes
                         }
                         5 => {
                             let mut lanes = [0.0; 4];
-                            for lane in 0..4 {
+                            for (lane, value) in lanes.iter_mut().enumerate() {
                                 let offset = lane * 2;
                                 let half = u16::from_be_bytes([b[offset], b[offset + 1]]);
-                                lanes[lane] = f16_bits_to_f32(half);
+                                *value = f16_bits_to_f32(half);
                             }
                             lanes
                         }
