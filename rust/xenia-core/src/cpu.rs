@@ -2084,8 +2084,7 @@ impl PpcInterpreter {
                             memory
                                 .read_bytes(GuestAddress(aligned), &mut merged)
                                 .map_err(Into::into)?;
-                            merged[..offset]
-                                .copy_from_slice(&self.state.vr[rt_rs][16 - offset..]);
+                            merged[..offset].copy_from_slice(&self.state.vr[rt_rs][16 - offset..]);
                             memory
                                 .write_bytes(GuestAddress(aligned), &merged)
                                 .map_err(Into::into)?;
@@ -9131,8 +9130,7 @@ mod tests {
     #[test]
     fn classic_and_vmx128_partial_right_loads_require_full_aligned_block() {
         let mut classic_memory = GuestMemory::new(GuestAddress(0x2000), 0x22);
-        let classic_instruction =
-            (31 << 26) | (1 << 21) | (3 << 16) | (4 << 11) | (551 << 1);
+        let classic_instruction = (31 << 26) | (1 << 21) | (3 << 16) | (4 << 11) | (551 << 1);
         put_instruction(&mut classic_memory, 0x2000, classic_instruction);
         let mut classic_cpu = fp_enabled_cpu();
         classic_cpu.state.pc = 0x2000;
