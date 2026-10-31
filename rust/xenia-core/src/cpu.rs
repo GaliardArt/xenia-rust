@@ -2333,28 +2333,47 @@ impl PpcInterpreter {
                         }
                     }
                     0b110000 | 0b110100 => {
-                        for lane in 0..4 {
+                        for lane in 0..2 {
                             let source_lane = if shift_operation == 0b110000 {
                                 lane
                             } else {
-                                lane + 4
+                                lane + 2
                             };
-                            result[lane * 4..lane * 4 + 4]
+                            let output_a = lane * 2;
+                            let output_b = output_a + 1;
+                            result[output_a * 4..output_a * 4 + 4]
                                 .copy_from_slice(&a[source_lane * 4..source_lane * 4 + 4]);
-                            result[(lane + 4) * 4..(lane + 4) * 4 + 4]
+                            result[output_b * 4..output_b * 4 + 4]
                                 .copy_from_slice(&b[source_lane * 4..source_lane * 4 + 4]);
                         }
                     }
                     0b111000 | 0b111100 => {
-                        for lane in 0..8 {
-                            let source_lane = if shift_operation == 0b111000 {
-                                lane
-                            } else {
-                                lane + 8
-                            };
-                            let byte = a[source_lane];
-                            let value = (byte as i8 as i16).to_be_bytes();
-                            result[lane * 2..lane * 2 + 2].copy_from_slice(&value);
+                        if registers.va == 0x60 {
+                            for lane in 0..4 {
+                                let source_lane = if shift_operation == 0b111000 {
+                                    lane
+                                } else {
+                                    lane + 4
+                                };
+                                let offset = source_lane * 2;
+                                let half = i16::from_be_bytes([
+                                    b[offset],
+                                    b[offset + 1],
+                                ]);
+                                result[lane * 4..lane * 4 + 4]
+                                    .copy_from_slice(&(half as i32).to_be_bytes());
+                            }
+                        } else {
+                            for lane in 0..8 {
+                                let source_lane = if shift_operation == 0b111000 {
+                                    lane
+                                } else {
+                                    lane + 8
+                                };
+                                let byte = b[source_lane];
+                                let value = (byte as i8 as i16).to_be_bytes();
+                                result[lane * 2..lane * 2 + 2].copy_from_slice(&value);
+                            }
                         }
                     }
                     _ => match compare_operation {
