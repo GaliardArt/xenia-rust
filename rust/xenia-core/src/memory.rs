@@ -342,7 +342,9 @@ mod tests {
     #[test]
     fn contiguous_writes_are_atomic_when_the_range_is_out_of_bounds() {
         let mut memory = GuestMemory::new(GuestAddress(0x7000), 4);
-        memory.write_bytes(GuestAddress(0x7000), &[1, 2, 3, 4]).unwrap();
+        memory
+            .write_bytes(GuestAddress(0x7000), &[1, 2, 3, 4])
+            .unwrap();
 
         assert_eq!(
             memory.write_bytes(GuestAddress(0x7002), &[9, 8, 7]),
