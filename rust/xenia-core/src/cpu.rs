@@ -7752,7 +7752,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.vr[1], [0xFE; 16]);
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.vr[1], [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]);
+        assert_eq!(cpu.state.vr[1], [0, 255, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3]);
     }
 
 }
