@@ -54,6 +54,35 @@ fn round_shift_right_even(value: u32, shift: u32) -> u32 {
     truncated + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
 }
 
+fn quiet_altivec_nan(value: f32) -> f32 {
+    f32::from_bits(value.to_bits() | 0x0040_0000)
+}
+
+fn altivec_fp_minmax(a: f32, b: f32, maximum: bool) -> f32 {
+    if a.is_nan() {
+        return quiet_altivec_nan(a);
+    }
+    if b.is_nan() {
+        return quiet_altivec_nan(b);
+    }
+    if a == 0.0 && b == 0.0 {
+        let a_bits = a.to_bits();
+        let b_bits = b.to_bits();
+        return f32::from_bits(if maximum {
+            a_bits & b_bits
+        } else {
+            a_bits | b_bits
+        });
+    }
+    if maximum {
+        if a >= b { a } else { b }
+    } else if a <= b {
+        a
+    } else {
+        b
+    }
+}
+
 fn flush_vscr_nj_denormal(value: f32, vscr: u32) -> f32 {
     if vscr & (1 << 15) != 0 && value.is_subnormal() {
         f32::from_bits(value.to_bits() & 0x8000_0000)
@@ -2939,8 +2968,8 @@ impl PpcInterpreter {
                                 586 => bv.trunc(),
                                 650 => bv.ceil(),
                                 714 => bv.floor(),
-                                1034 => av.max(bv),
-                                1098 => av.min(bv),
+                                1034 => altivec_fp_minmax(av, bv, true),
+                                1098 => altivec_fp_minmax(av, bv, false),
                                 _ => unreachable!(),
                             };
                             let value = flush_vscr_nj_denormal(value, self.state.vscr);
@@ -8986,6 +9015,44 @@ mod tests {
             [0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18]
         );
     }
+    #[test]
+    fn altivec_fp_minmax_preserves_nan_precedence_and_signed_zero() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode_vx(1, 2, 3, 1034)); // vmaxfp
+        put_instruction(&mut memory, 0x1004, encode_vx(4, 2, 3, 1098)); // vminfp
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [
+            0x3F, 0x80, 0, 0, 0x7F, 0xA1, 0x23, 0x45,
+            0, 0, 0, 0, 0xBF, 0x80, 0, 0,
+        ];
+        cpu.state.vr[3] = [
+            0x7F, 0xC1, 0x23, 0x45, 0x40, 0, 0, 0,
+            0x80, 0, 0, 0, 0x40, 0, 0, 0,
+        ];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [
+                0x7F, 0xC1, 0x23, 0x45, 0x7F, 0xE1, 0x23, 0x45,
+                0, 0, 0, 0, 0x40, 0, 0, 0,
+            ]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[4],
+            [
+                0x7F, 0xC1, 0x23, 0x45, 0x7F, 0xE1, 0x23, 0x45,
+                0x80, 0, 0, 0, 0xBF, 0x80, 0, 0,
+            ]
+        );
+    }
+
     #[test]
     fn vscr_non_java_mode_flushes_denormal_inputs_and_underflow_results() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
