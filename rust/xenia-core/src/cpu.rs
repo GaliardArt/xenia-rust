@@ -1347,7 +1347,7 @@ impl PpcInterpreter {
                     rotated & mask
                 };
                 self.state.gpr[ra] = value as u64;
-                if instruction & 1 != 0 {
+                if instruction & (1 << 10) != 0 {
                     self.set_cr_field(0, (value as i32).cmp(&0));
                 }
                 self.state.pc = next_pc;
@@ -2292,7 +2292,15 @@ impl PpcInterpreter {
                 let vd = ((instruction >> 21) & 0x1F) as usize;
                 let va = ((instruction >> 16) & 0x1F) as usize;
                 let vb = ((instruction >> 11) & 0x1F) as usize;
-                let xo = instruction & 0x7FE;
+                let compare_xo = instruction & 0x3FF;
+                let xo = if matches!(
+                    compare_xo,
+                    6 | 70 | 134 | 198 | 454 | 518 | 582 | 646 | 710 | 774 | 838 | 902 | 966
+                ) {
+                    compare_xo
+                } else {
+                    instruction & 0x7FE
+                };
                 let a = self.state.vr[va];
                 let b = self.state.vr[vb];
                 let mut result = [0_u8; 16];
@@ -3808,16 +3816,16 @@ impl PpcInterpreter {
                     let source = self.state.vr[registers.vb];
                     let old = self.state.vr[registers.vd];
                     for lane in 0..4 {
-                        let source_lane = (lane + rotate) & 3;
                         let use_source = mask & (1 << (3 - lane)) != 0;
                         let start = lane * 4;
-                        let source_start = source_lane * 4;
-                        let selected = if use_source {
-                            &source[source_start..source_start + 4]
+                        if use_source {
+                            for byte in 0..4 {
+                                let source_byte = (byte + rotate) & 3;
+                                result[start + byte] = source[start + source_byte];
+                            }
                         } else {
-                            &old[start..start + 4]
-                        };
-                        result[start..start + 4].copy_from_slice(selected);
+                            result[start..start + 4].copy_from_slice(&old[start..start + 4]);
+                        }
                     }
                     self.state.vr[registers.vd] = result;
                     self.state.pc = next_pc;
@@ -8490,7 +8498,7 @@ mod tests {
         };
         put_instruction(&mut memory, 0x1000, encode(1, 2, 3, 2)); // vmaxub
         put_instruction(&mut memory, 0x1004, encode(1, 2, 3, 512)); // vaddubs
-        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 7)); // vcmpequb Rc
+        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 6 | (1 << 10))); // vcmpequb Rc
         put_instruction(&mut memory, 0x100C, encode(1, 0x1E, 3, 780)); // vspltisb -2
         put_instruction(&mut memory, 0x1010, encode(1, 2, 3, 43 | (5 << 6))); // vperm
         let mut cpu = fp_enabled_cpu();
@@ -8770,7 +8778,7 @@ mod tests {
         cpu.state.pc = 0x2000;
         cpu.state.gpr[1] = 0x2040;
         cpu.state.gpr[2] = 3;
-        cpu.state.gpr[3] = 0x2050;
+        cpu.state.gpr[3] = 0x10;
 
         for _ in 0..3 {
             cpu.step(&mut memory).unwrap();
@@ -8790,7 +8798,7 @@ mod tests {
     fn altivec_partial_sum_instructions_saturate_and_set_vscr_sat() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
-            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | (xo << 1)
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
         };
         put_instruction(&mut memory, 0x1000, encode(1, 2, 3, 1544)); // vsum4ubs
         put_instruction(&mut memory, 0x1004, encode(1, 2, 3, 1672)); // vsum2sws
