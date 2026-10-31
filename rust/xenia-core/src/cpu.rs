@@ -8857,5 +8857,4 @@ mod tests {
         assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0xB3, 0, 0, 0]);
         assert_eq!(&cpu.state.vr[vd as usize][12..16], &[0xA3, 0, 0, 0]);
     }
-
 }
