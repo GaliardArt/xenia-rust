@@ -81,7 +81,7 @@ fn f32_to_f16_bits(value: f32) -> u16 {
     }
 
     if unbiased_exponent >= -14 {
-        let mut half_exponent = unbiased_exponent + 15;
+        let half_exponent = unbiased_exponent + 15;
         let rounded_fraction = round_shift_right_even(fraction, 13);
         let (half_exponent, half_fraction) = if rounded_fraction == 0x400 {
             (half_exponent + 1, 0)
@@ -8803,7 +8803,10 @@ mod tests {
         // Halfway between subnormal 1 and 2 rounds to the even value 2.
         assert_eq!(f32_to_f16_bits(3.0 * 2.0_f32.powi(-25)), 0x0002);
         // Rounding the largest subnormal midpoint reaches the minimum normal.
-        assert_eq!(f32_to_f16_bits(2.0_f32.powi(-14) - 2.0_f32.powi(-25)), 0x0400);
+        assert_eq!(
+            f32_to_f16_bits(2.0_f32.powi(-14) - 2.0_f32.powi(-25)),
+            0x0400
+        );
         assert_eq!(f32_to_f16_bits(-2.0_f32.powi(-25)), 0x8000);
     }
 
