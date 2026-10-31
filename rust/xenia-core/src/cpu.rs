@@ -3404,7 +3404,7 @@ impl PpcInterpreter {
 
                 // VX128_4 immediate word rotate/insert.
                 let special_selector =
-                    (((instruction >> 8) & 0x7) << 2) | ((instruction >> 4) & 0x3);
+                    (((instruction >> 8) & 0x7) << 4) | ((instruction >> 4) & 0x3);
                 // VX128_4 vpkd3d128: pack binary32 lanes into half floats.
                 if special_selector == 0b1100001 {
                     let immediate = (instruction >> 11) & 0x1F;
