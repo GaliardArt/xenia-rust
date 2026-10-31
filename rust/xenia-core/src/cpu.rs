@@ -2062,11 +2062,13 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let aligned = address & !0xF;
                         let offset = (address & 0xF) as usize;
+                        let mut merged = [0; 16];
                         memory
-                            .write_bytes(
-                                GuestAddress(aligned.wrapping_add(offset as u32)),
-                                &self.state.vr[rt_rs][..16 - offset],
-                            )
+                            .read_bytes(GuestAddress(aligned), &mut merged)
+                            .map_err(Into::into)?;
+                        merged[offset..].copy_from_slice(&self.state.vr[rt_rs][..16 - offset]);
+                        memory
+                            .write_bytes(GuestAddress(aligned), &merged)
                             .map_err(Into::into)?;
                     }
                     679 | 935 => {
@@ -2079,11 +2081,14 @@ impl PpcInterpreter {
                         let aligned = address & !0xF;
                         let offset = (address & 0xF) as usize;
                         if offset != 0 {
+                            let mut merged = [0; 16];
                             memory
-                                .write_bytes(
-                                    GuestAddress(aligned),
-                                    &self.state.vr[rt_rs][16 - offset..],
-                                )
+                                .read_bytes(GuestAddress(aligned), &mut merged)
+                                .map_err(Into::into)?;
+                            merged[..offset]
+                                .copy_from_slice(&self.state.vr[rt_rs][16 - offset..]);
+                            memory
+                                .write_bytes(GuestAddress(aligned), &merged)
                                 .map_err(Into::into)?;
                         }
                     }
@@ -2365,17 +2370,26 @@ impl PpcInterpreter {
                                 .map_err(Into::into)?;
                         }
                         1283 | 1795 => {
+                            let mut merged = [0; 16];
                             memory
-                                .write_bytes(
-                                    GuestAddress(aligned.wrapping_add(offset as u32)),
-                                    &vector[..16 - offset],
-                                )
+                                .read_bytes(GuestAddress(aligned), &mut merged)
+                                .map_err(Into::into)?;
+                            merged[offset..].copy_from_slice(&vector[..16 - offset]);
+                            memory
+                                .write_bytes(GuestAddress(aligned), &merged)
                                 .map_err(Into::into)?;
                         }
                         1347 | 1859 => {
-                            memory
-                                .write_bytes(GuestAddress(aligned), &vector[16 - offset..])
-                                .map_err(Into::into)?;
+                            if offset != 0 {
+                                let mut merged = [0; 16];
+                                memory
+                                    .read_bytes(GuestAddress(aligned), &mut merged)
+                                    .map_err(Into::into)?;
+                                merged[..offset].copy_from_slice(&vector[16 - offset..]);
+                                memory
+                                    .write_bytes(GuestAddress(aligned), &merged)
+                                    .map_err(Into::into)?;
+                            }
                         }
                         _ => unreachable!(),
                     }
