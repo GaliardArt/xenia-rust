@@ -1992,7 +1992,7 @@ impl PpcInterpreter {
                 let vd = ((instruction >> 21) & 0x1F) as usize;
                 let va = ((instruction >> 16) & 0x1F) as usize;
                 let vb = ((instruction >> 11) & 0x1F) as usize;
-                let xo = instruction & 0x7FF;
+                let xo = instruction & 0x7FE;
                 let a = self.state.vr[va];
                 let b = self.state.vr[vb];
                 let mut result = [0_u8; 16];
