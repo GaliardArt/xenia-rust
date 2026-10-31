@@ -3407,7 +3407,7 @@ impl PpcInterpreter {
                     (((instruction >> 8) & 0x7) << 4) | ((instruction >> 4) & 0x3);
                 // VX128_4 vpkd3d128: pack binary32 lanes into half floats.
                 if special_selector == 0b1100001 {
-                    let immediate = (instruction >> 11) & 0x1F;
+                    let immediate = (instruction >> 16) & 0x1F;
                     let pack_type = immediate >> 2;
                     let pack_mode = immediate & 3;
                     if !matches!(pack_type, 3 | 5) {
@@ -3447,7 +3447,7 @@ impl PpcInterpreter {
 
                 if special_selector == 0b1110001 {
                     let rotate = ((instruction >> 6) & 0x3) as usize;
-                    let mask = (instruction >> 11) & 0x1F;
+                    let mask = (instruction >> 16) & 0x1F;
                     let source = self.state.vr[registers.vb];
                     let old = self.state.vr[registers.vd];
                     for lane in 0..4 {
@@ -8357,11 +8357,12 @@ mod tests {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
         let instruction = (6 << 26)
             | (0x41 << 21)
-            | (0x1F << 11)
+            | (1 << 11)
+            | (0x1F << 16)
             | (0b111 << 8)
-            | (1 << 7)
+            | (1 << 6)
             | (1 << 4)
-            | (1 << 2);
+            | (2 << 2);
         put_instruction(&mut memory, 0x1000, instruction);
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
