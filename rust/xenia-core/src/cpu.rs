@@ -8931,7 +8931,7 @@ mod tests {
     fn altivec_packed_pixel_operations_match_reference_lane_order() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
-            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | (xo << 1)
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
         };
         put_instruction(&mut memory, 0x1000, encode(5, 3, 4, 782)); // vpkpx
         put_instruction(&mut memory, 0x1004, encode(6, 0, 4, 846)); // vupkhpx
