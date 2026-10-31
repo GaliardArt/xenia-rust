@@ -8999,7 +8999,7 @@ mod tests {
 
         // vmsummbm: signed bytes from VA times unsigned bytes from VB.
         cpu.state.pc = 0x1004;
-        cpu.state.vr[2] = [0xFF, 2, 0xFD, 4; 4];
+        cpu.state.vr[2] = [0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4, 0xFF, 2, 0xFD, 4];
         cpu.step(&mut memory).unwrap();
         assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 22);
 
@@ -9033,8 +9033,8 @@ mod tests {
         // vmsumshs saturates a signed halfword sum to INT32_MIN.
         cpu.state.pc = 0x1014;
         cpu.state.vr[2] = [0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0];
-        cpu.state.vr[3] = [0x7F, 0xFF; 8];
-        cpu.state.vr[4] = [0xC4, 0x65, 0x36, 0x00; 4]; // -1,000,000,000
+        cpu.state.vr[3] = [0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF, 0x7F, 0xFF];
+        cpu.state.vr[4] = [0xC4, 0x65, 0x36, 0x00, 0xC4, 0x65, 0x36, 0x00, 0xC4, 0x65, 0x36, 0x00, 0xC4, 0x65, 0x36, 0x00]; // -1,000,000,000
         cpu.step(&mut memory).unwrap();
         assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), i32::MIN as u32);
         assert_ne!(cpu.state.vscr & (1 << 31), 0);
