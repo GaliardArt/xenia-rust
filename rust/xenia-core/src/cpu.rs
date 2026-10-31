@@ -8944,6 +8944,8 @@ mod tests {
         put_instruction(&mut memory, 0x200C, encode(4, 3, 5, 39)); // lvehx
         put_instruction(&mut memory, 0x2010, encode(5, 3, 6, 71)); // lvewx
         put_instruction(&mut memory, 0x2014, encode(3, 3, 4, 135)); // stvebx
+        put_instruction(&mut memory, 0x2018, encode(4, 3, 5, 167)); // stvehx
+        put_instruction(&mut memory, 0x201C, encode(5, 3, 6, 199)); // stvewx
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x2000;
         cpu.state.gpr[3] = 0x1000;
@@ -8977,6 +8979,20 @@ mod tests {
         cpu.state.vr[3][5] = 0xE5;
         cpu.step(&mut memory).unwrap();
         assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
+
+        cpu.state.vr[4][6..8].copy_from_slice(&[0x12, 0x34]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1006), 2),
+            Ok(&[0x12, 0x34][..])
+        );
+
+        cpu.state.vr[5][8..12].copy_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1008), 4),
+            Ok(&[0x12, 0x34, 0x56, 0x78][..])
+        );
     }
     #[test]
     fn vmx128_d3d_pack_matches_independent_xenia_reference_vectors() {
