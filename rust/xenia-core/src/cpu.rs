@@ -2909,17 +2909,16 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn vmx128_register_decode_reconstructs_split_extension_bits() {
-        // Encode VD=0x7D, VA=0x52, VB=0x43 using the upstream VX128 layout.
+        // Encode VD=0x7D, VA=0x72, VB=0x43 using the upstream VX128 layout.
         let instruction = (0x1D_u32 << 21)
-            | (0x12_u32 << 11)
-            | (0x03_u32 << 16)
-            | (0x3_u32 << 28)
-            | (0x1_u32 << 26)
-            | (0x1_u32 << 21)
-            | (0x2_u32 << 30);
-        let decoded = decode_vmx128_register_fields(instruction);
+            | (0x12_u32 << 16)
+            | (0x03_u32 << 11)
+            | (0x3_u32 << 2)
+            | (0x1_u32 << 5)
+            | (0x1_u32 << 10)
+            | 0x2_u32;
+        let decoded = super::decode_vmx128_register_fields(instruction);
 
         assert_eq!(decoded.vd, 0x7D);
         assert_eq!(decoded.va, 0x72);
@@ -2929,13 +2928,13 @@ mod tests {
     #[test]
     fn vmx128_register_decode_reaches_all_128_register_indices() {
         let instruction = (0x1F_u32 << 21)
-            | (0x1F_u32 << 11)
             | (0x1F_u32 << 16)
-            | (0x3_u32 << 28)
-            | (0x1_u32 << 26)
-            | (0x1_u32 << 21)
-            | (0x3_u32 << 30);
-        let decoded = decode_vmx128_register_fields(instruction);
+            | (0x1F_u32 << 11)
+            | (0x3_u32 << 2)
+            | (0x1_u32 << 5)
+            | (0x1_u32 << 10)
+            | 0x3_u32;
+        let decoded = super::decode_vmx128_register_fields(instruction);
 
         assert_eq!(decoded.vd, 0x7F);
         assert_eq!(decoded.va, 0x7F);
