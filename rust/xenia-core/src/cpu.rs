@@ -35,39 +35,77 @@ pub fn decode_vmx128_register_fields(instruction: u32) -> Vmx128RegisterFields {
     }
 }
 
+fn round_shift_right_even(value: u32, shift: u32) -> u32 {
+    if shift == 0 {
+        return value;
+    }
+    if shift > 32 {
+        return 0;
+    }
+    if shift == 32 {
+        return u32::from(value > 0x8000_0000);
+    }
+
+    let truncated = value >> shift;
+    let remainder_mask = (1_u32 << shift) - 1;
+    let remainder = value & remainder_mask;
+    let halfway = 1_u32 << (shift - 1);
+    truncated
+        + u32::from(remainder > halfway || (remainder == halfway && truncated & 1 != 0))
+}
+
 fn f32_to_f16_bits(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
-    let exponent = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
-    let mantissa = bits & 0x7F_FFFF;
+    let exponent = ((bits >> 23) & 0xFF) as i32;
+    let fraction = bits & 0x007F_FFFF;
 
-    if exponent <= 0 {
-        if exponent < -10 {
-            return sign;
+    if exponent == 0xFF {
+        if fraction == 0 {
+            return sign | 0x7C00;
         }
-        let significand = mantissa | 0x80_0000;
-        let shift = (14 - exponent) as u32;
-        let rounded = (significand + (1 << (shift - 1))) >> shift;
-        return sign | rounded as u16;
-    }
-    if exponent >= 31 {
-        return sign | if mantissa == 0 { 0x7C00 } else { 0x7E00 };
+        // Preserve the most significant payload bits and always quiet a NaN.
+        let payload = ((fraction >> 13) as u16) | 0x0200;
+        return sign | 0x7C00 | payload;
     }
 
-    let rounded = mantissa + 0x0FFF + ((mantissa >> 13) & 1);
-    let mut half_exponent = exponent;
-    let mut half_mantissa = rounded >> 13;
-    if half_mantissa & 0x0400 != 0 {
-        half_exponent += 1;
-        half_mantissa = 0;
-    }
-    if half_exponent >= 31 {
-        sign | 0x7C00
+    let unbiased_exponent = if exponent == 0 { -126 } else { exponent - 127 };
+    let significand = if exponent == 0 {
+        fraction
     } else {
-        sign | ((half_exponent as u16) << 10) | (half_mantissa as u16 & 0x03FF)
+        fraction | 0x0080_0000
+    };
+
+    if unbiased_exponent > 15 {
+        return sign | 0x7C00;
+    }
+
+    if unbiased_exponent >= -14 {
+        let mut half_exponent = unbiased_exponent + 15;
+        let rounded_fraction = round_shift_right_even(fraction, 13);
+        let (half_exponent, half_fraction) = if rounded_fraction == 0x400 {
+            (half_exponent + 1, 0)
+        } else {
+            (half_exponent, rounded_fraction)
+        };
+        if half_exponent >= 31 {
+            sign | 0x7C00
+        } else {
+            sign | ((half_exponent as u16) << 10) | (half_fraction as u16 & 0x03FF)
+        }
+    } else {
+        // Half subnormals are integer multiples of 2^-24. Round directly
+        // in that unit so ties at zero and at the normal/subnormal boundary
+        // obey the same round-to-nearest, ties-to-even rule.
+        let shift = (-unbiased_exponent - 1) as u32;
+        let rounded = round_shift_right_even(significand, shift);
+        if rounded >= 0x400 {
+            sign | 0x0400
+        } else {
+            sign | rounded as u16
+        }
     }
 }
-
 fn f16_bits_to_f32(bits: u16) -> f32 {
     let sign = ((bits as u32) & 0x8000) << 16;
     let exponent = ((bits >> 10) & 0x1F) as u32;
@@ -8751,6 +8789,22 @@ mod tests {
         assert_eq!(f16_bits_to_f32(0xC000), -2.0);
         assert_eq!(f16_bits_to_f32(0x0001), 2.0_f32.powi(-24));
         assert!(f16_bits_to_f32(0x7E00).is_nan());
+    }
+
+    #[test]
+    fn binary16_conversion_uses_ties_to_even_for_normal_and_subnormal_boundaries() {
+        // 1 + 0.5 ULP is exactly halfway and rounds to the even lower value.
+        assert_eq!(f32_to_f16_bits(1.0 + 2.0_f32.powi(-11)), 0x3C00);
+        // The next midpoint rounds upward because the retained LSB is odd.
+        assert_eq!(f32_to_f16_bits(1.0 + 3.0 * 2.0_f32.powi(-11)), 0x3C02);
+
+        // Halfway between zero and the least half subnormal rounds to zero.
+        assert_eq!(f32_to_f16_bits(2.0_f32.powi(-25)), 0x0000);
+        // Halfway between subnormal 1 and 2 rounds to the even value 2.
+        assert_eq!(f32_to_f16_bits(3.0 * 2.0_f32.powi(-25)), 0x0002);
+        // Rounding the largest subnormal midpoint reaches the minimum normal.
+        assert_eq!(f32_to_f16_bits(2.0_f32.powi(-14) - 2.0_f32.powi(-25)), 0x0400);
+        assert_eq!(f32_to_f16_bits(-2.0_f32.powi(-25)), 0x8000);
     }
 
     #[test]
