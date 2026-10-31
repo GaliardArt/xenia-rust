@@ -2326,9 +2326,15 @@ impl PpcInterpreter {
                 let vd = ((instruction >> 21) & 0x1F) as usize;
                 let va = ((instruction >> 16) & 0x1F) as usize;
                 let vb = ((instruction >> 11) & 0x1F) as usize;
-                // XO occupies bits 1..10; bit 0 is Rc for compare forms.
-                // Clear Rc uniformly while preserving the complete XO field.
-                let xo = instruction & 0x7FE;
+                let compare_xo = instruction & 0x3FF;
+                let xo = if matches!(
+                    compare_xo,
+                    6 | 70 | 134 | 198 | 454 | 518 | 582 | 646 | 710 | 774 | 838 | 902 | 966
+                ) {
+                    compare_xo
+                } else {
+                    instruction & 0x7FE
+                };
                 let a = self.state.vr[va];
                 let b = self.state.vr[vb];
                 let mut result = [0_u8; 16];
@@ -3254,7 +3260,7 @@ impl PpcInterpreter {
                                 all_false &= !is_true;
                             }
                         }
-                        if instruction & 1 != 0 {
+                        if instruction & (1 << 10) != 0 {
                             self.state.cr[6] = if all_true {
                                 0b1000
                             } else if all_false {
@@ -8540,7 +8546,7 @@ mod tests {
         };
         put_instruction(&mut memory, 0x1000, encode(1, 2, 3, 2)); // vmaxub
         put_instruction(&mut memory, 0x1004, encode(1, 2, 3, 512)); // vaddubs
-        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 6 | 1)); // vcmpequb Rc
+        put_instruction(&mut memory, 0x1008, encode(1, 2, 3, 6 | (1 << 10))); // vcmpequb Rc
         put_instruction(&mut memory, 0x100C, encode(1, 0x1E, 3, 780)); // vspltisb -2
         put_instruction(&mut memory, 0x1010, encode(1, 2, 3, 43 | (5 << 6))); // vperm
         let mut cpu = fp_enabled_cpu();
