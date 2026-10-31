@@ -3865,10 +3865,9 @@ impl PpcInterpreter {
                         let use_source = mask & (1 << (3 - lane)) != 0;
                         let start = lane * 4;
                         if use_source {
-                            for byte in 0..4 {
-                                let source_byte = (byte + rotate) & 3;
-                                result[start + byte] = source[start + source_byte];
-                            }
+                            let source_start = ((lane + rotate) & 3) * 4;
+                            result[start..start + 4]
+                                .copy_from_slice(&source[source_start..source_start + 4]);
                         } else {
                             result[start..start + 4].copy_from_slice(&old[start..start + 4]);
                         }
@@ -9033,9 +9032,9 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0, 0, 0, 0xB0]);
+        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0xB1, 0, 0, 0]);
         assert_eq!(&cpu.state.vr[vd as usize][4..8], &[0xA1, 0, 0, 0]);
-        assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0, 0, 0, 0xB2]);
+        assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0xB3, 0, 0, 0]);
         assert_eq!(&cpu.state.vr[vd as usize][12..16], &[0xA3, 0, 0, 0]);
     }
 
