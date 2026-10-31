@@ -2025,7 +2025,9 @@ impl PpcInterpreter {
                         for (lane, byte) in vector.iter_mut().enumerate() {
                             if lane + offset < 16 {
                                 *byte = memory
-                                    .read_u8(GuestAddress(aligned.wrapping_add((lane + offset) as u32)))
+                                    .read_u8(GuestAddress(
+                                        aligned.wrapping_add((lane + offset) as u32),
+                                    ))
                                     .map_err(Into::into)?;
                             }
                         }
@@ -8647,8 +8649,7 @@ mod tests {
     #[test]
     fn altivec_vcmpbfp_sets_both_nan_bits_and_summarizes_bounds() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
-        let instruction =
-            (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 966 | (1 << 10);
+        let instruction = (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 966 | (1 << 10);
         put_instruction(&mut memory, 0x1000, instruction);
 
         let mut cpu = fp_enabled_cpu();
@@ -8665,9 +8666,7 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[1],
-            [
-                0, 0, 0, 0, 0x80, 0, 0, 0, 0x40, 0, 0, 0, 0xC0, 0, 0, 0
-            ]
+            [0, 0, 0, 0, 0x80, 0, 0, 0, 0x40, 0, 0, 0, 0xC0, 0, 0, 0]
         );
         assert_eq!(cpu.state.cr[6], 0b0100);
 
@@ -9086,11 +9085,7 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            put_instruction(
-                &mut memory,
-                0x2000 + index as u32 * 4,
-                encode(1, 3, 4, xo),
-            );
+            put_instruction(&mut memory, 0x2000 + index as u32 * 4, encode(1, 3, 4, xo));
         }
 
         let mut cpu = fp_enabled_cpu();
@@ -9130,7 +9125,9 @@ mod tests {
         cpu.step(&mut memory).unwrap(); // stvlxl
         assert_eq!(
             memory.read_bytes(GuestAddress(0x1045), 11),
-            Ok(&[0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA][..])
+            Ok(&[
+                0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA
+            ][..])
         );
         cpu.state.vr[1] = core::array::from_fn(|index| index as u8);
         cpu.step(&mut memory).unwrap(); // stvrx
