@@ -5311,6 +5311,139 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_permute_selects_bytes_from_both_extended_sources() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let encode = |vd: u32, va: u32, vb: u32, vc: u32| {
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vc & 7) << 6)
+                | ((vb >> 5) & 3)
+        };
+        put_instruction(&mut memory, 0x1000, encode(0x7D, 0x72, 0x43, 5));
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x72] = std::array::from_fn(|i| i as u8);
+        cpu.state.vr[0x43] = std::array::from_fn(|i| (0x80 + i) as u8);
+        cpu.state.vr[5] = [0, 15, 16, 31, 1, 14, 17, 30, 2, 13, 18, 29, 3, 12, 19, 28];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0, 15, 0x80, 0x8F, 1, 14, 0x81, 0x8E, 2, 13, 0x82, 0x8D, 3, 12, 0x83, 0x8C]
+        );
+    }
+
+    #[test]
+    fn vmx128_word_shifts_and_comparisons_execute_on_extended_registers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode_shift = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 1) << 4)
+        };
+        let encode_compare = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 1) & 7) << 7)
+                | ((operation & 1) << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode_shift(0x7D, 0x72, 0x43, 0b001101));
+        put_instruction(&mut memory, 0x1004, encode_shift(0x7D, 0x72, 0x43, 0b011101));
+        put_instruction(&mut memory, 0x1008, encode_compare(0x7D, 0x72, 0x43, 0b100000));
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x72] = [
+            0x80, 0, 0, 1, 0x80, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 4,
+        ];
+        cpu.state.vr[0x43] = [
+            0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 1,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0, 0, 0, 2, 0, 0, 0, 4, 0xFF, 0xFF, 0xFF, 0xFE, 0, 0, 0, 8]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0x40, 0, 0, 0, 0x40, 0, 0, 1, 0x7F, 0xFF, 0xFF, 0xFF, 0, 0, 0, 2]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn vmx128_float_arithmetic_and_saturating_pack_update_architectural_state() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 1) << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode(0x7D, 0x72, 0x43, 0b000001));
+        put_instruction(&mut memory, 0x1004, encode(0x7D, 0x72, 0x43, 0b100000));
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        for lane in 0..4 {
+            cpu.state.vr[0x72][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&(1.5_f32 + lane as f32).to_bits().to_be_bytes());
+            cpu.state.vr[0x43][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&(2.5_f32 + lane as f32).to_bits().to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        for lane in 0..4 {
+            let offset = lane * 4;
+            let actual = f32::from_bits(u32::from_be_bytes(
+                cpu.state.vr[0x7D][offset..offset + 4].try_into().unwrap(),
+            ));
+            assert_eq!(actual, 4.0 + (lane as f32 * 2.0));
+        }
+
+        cpu.state.vr[0x72] = [
+            0x00, 0x7F, 0xFF, 0x80, 0x00, 0x01, 0xFF, 0xFF,
+            0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05,
+        ];
+        cpu.state.vr[0x43] = [
+            0x00, 0x80, 0x00, 0x7F, 0x00, 0x02, 0x00, 0x03,
+            0x00, 0x04, 0x00, 0x05, 0x00, 0x06, 0x00, 0x07,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0x7F, 0x7F, 0xFF, 0x80, 0x01, 0x7F, 0x7F, 0x7F,
+             0, 2, 3, 4, 5, 6, 7, 7]
+        );
+        assert_ne!(cpu.state.vscr & (1 << 31), 0);
+    }
+
+    #[test]
     fn vmx128_logical_instructions_execute_with_extended_register_indices() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
         let encode_vmx128 = |vd: u32, va: u32, vb: u32, operation: u32| {
