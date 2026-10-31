@@ -8894,6 +8894,30 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_vector_store_does_not_partially_modify_memory_on_fault() {
+        let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x24);
+        let encode_memory = |selector: u32, vd: u32, ra: u32, rb: u32| {
+            (4 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((ra & 0x1F) << 16)
+                | ((rb & 0x1F) << 11)
+                | (((selector >> 2) & 0x7F) << 4)
+                | (selector & 3)
+                | (((vd >> 5) & 3) << 2)
+        };
+        put_instruction(&mut memory, 0x2000, encode_memory(451, 0x65, 1, 2));
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x2000;
+        cpu.state.gpr[1] = 0x2020;
+        cpu.state.gpr[2] = 0;
+        cpu.state.vr[0x65] = [0xA5; 16];
+
+        assert!(cpu.step(&mut memory).is_err());
+        assert_eq!(memory.read_bytes(GuestAddress(0x2020), 4), Ok(&[0; 4][..]));
+        assert_eq!(cpu.state.pc, 0x2000);
+    }
+
+    #[test]
     fn altivec_partial_sum_instructions_saturate_and_set_vscr_sat() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
         let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
