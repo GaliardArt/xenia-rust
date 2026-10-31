@@ -2883,7 +2883,7 @@ mod tests {
 
     #[test]
     fn vmx_wrapping_add_and_subtract_cover_byte_halfword_and_word_lanes() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
         let encode_vmx = |vd: u32, va: u32, vb: u32, xo: u32| {
             (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
         };
@@ -2969,7 +2969,7 @@ mod tests {
 
     #[test]
     fn vmx_logical_operations_preserve_guest_byte_order() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 20);
         let encode_vmx = |vd: u32, va: u32, vb: u32, xo: u32| {
             (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
         };
