@@ -35,6 +35,61 @@ pub fn decode_vmx128_register_fields(instruction: u32) -> Vmx128RegisterFields {
     }
 }
 
+fn f32_to_f16_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exponent = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
+    let mantissa = bits & 0x7F_FFFF;
+
+    if exponent <= 0 {
+        if exponent < -10 {
+            return sign;
+        }
+        let significand = mantissa | 0x80_0000;
+        let shift = (14 - exponent) as u32;
+        let rounded = (significand + (1 << (shift - 1))) >> shift;
+        return sign | rounded as u16;
+    }
+    if exponent >= 31 {
+        return sign | if mantissa == 0 { 0x7C00 } else { 0x7E00 };
+    }
+
+    let rounded = mantissa + 0x0FFF + ((mantissa >> 13) & 1);
+    let mut half_exponent = exponent;
+    let mut half_mantissa = rounded >> 13;
+    if half_mantissa & 0x0400 != 0 {
+        half_exponent += 1;
+        half_mantissa = 0;
+    }
+    if half_exponent >= 31 {
+        sign | 0x7C00
+    } else {
+        sign | ((half_exponent as u16) << 10) | (half_mantissa as u16 & 0x03FF)
+    }
+}
+
+fn f16_bits_to_f32(bits: u16) -> f32 {
+    let sign = ((bits as u32) & 0x8000) << 16;
+    let exponent = ((bits >> 10) & 0x1F) as u32;
+    let mantissa = (bits & 0x03FF) as u32;
+    let output = match exponent {
+        0 if mantissa == 0 => sign,
+        0 => {
+            let mut normalized = mantissa;
+            let mut shift = 0;
+            while normalized & 0x0400 == 0 {
+                normalized <<= 1;
+                shift += 1;
+            }
+            let exp = 127 - 15 - shift + 1;
+            sign | (exp << 23) | ((normalized & 0x03FF) << 13)
+        }
+        31 => sign | 0x7F80_0000 | (mantissa << 13),
+        _ => sign | ((exponent + 112) << 23) | (mantissa << 13),
+    };
+    f32::from_bits(output)
+}
+
 /// PowerPC MSR floating-point exception mode bits in Xenon's 64-bit MSR.
 pub const PPC_MSR_FE0: u64 = 1 << 11;
 pub const PPC_MSR_FE1: u64 = 1 << 8;
