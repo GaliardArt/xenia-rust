@@ -2259,10 +2259,7 @@ impl PpcInterpreter {
                             let lane = ((address & 0xC) >> 2) as usize;
                             let start = lane * 4;
                             memory
-                                .write_bytes(
-                                    GuestAddress(word_address),
-                                    &vector[start..start + 4],
-                                )
+                                .write_bytes(GuestAddress(word_address), &vector[start..start + 4])
                                 .map_err(Into::into)?;
                         }
                         1027 | 1539 => {
@@ -8925,7 +8922,10 @@ mod tests {
             memory.read_bytes(GuestAddress(0x2048), 4),
             Ok(&[8, 9, 10, 11][..])
         );
-        assert_eq!(cpu.state.vr[0x65], core::array::from_fn(|index| index as u8));
+        assert_eq!(
+            cpu.state.vr[0x65],
+            core::array::from_fn(|index| index as u8)
+        );
         assert_eq!(cpu.state.pc, 0x2004);
     }
 
