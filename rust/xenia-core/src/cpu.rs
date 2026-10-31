@@ -3915,33 +3915,37 @@ impl PpcInterpreter {
                             source[offset..offset + 4].try_into().unwrap(),
                         ))
                     });
-                    let unorm =
-                        |value: f32, max: u32| (value.clamp(0.0, 1.0) * max as f32).round() as u32;
-                    let snorm =
-                        |value: f32| (value.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+                    let clamp_bits = |value: f32, min: u32, max: u32| {
+                        value
+                            .max(f32::from_bits(min))
+                            .min(f32::from_bits(max))
+                            .to_bits()
+                    };
                     let mut packed = [0_u8; 16];
                     let packed_len = match pack_type {
                         0 => {
-                            packed[..4].copy_from_slice(&[
-                                unorm(floats[3], 255) as u8,
-                                unorm(floats[0], 255) as u8,
-                                unorm(floats[1], 255) as u8,
-                                unorm(floats[2], 255) as u8,
-                            ]);
+                            let channels = [floats[3], floats[0], floats[1], floats[2]];
+                            for (index, value) in channels.into_iter().enumerate() {
+                                packed[index] =
+                                    (clamp_bits(value, 0x4040_0000, 0x4040_00FF) & 0xFF) as u8;
+                            }
                             4
                         }
                         1 => {
                             for lane in 0..2 {
+                                let raw =
+                                    clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
                                 packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&snorm(floats[lane]).to_be_bytes());
+                                    .copy_from_slice(&raw.to_be_bytes());
                             }
                             4
                         }
                         2 => {
-                            let value = unorm(floats[0], 1023)
-                                | (unorm(floats[1], 1023) << 10)
-                                | (unorm(floats[2], 1023) << 20)
-                                | (unorm(floats[3], 3) << 30);
+                            let x = clamp_bits(floats[0], 0x403F_FE01, 0x4040_01FF) & 0x3FF;
+                            let y = clamp_bits(floats[1], 0x403F_FE01, 0x4040_01FF) & 0x3FF;
+                            let z = clamp_bits(floats[2], 0x403F_FE01, 0x4040_01FF) & 0x3FF;
+                            let w = clamp_bits(floats[3], 0x4040_0000, 0x4040_0003) & 0x3;
+                            let value = x | (y << 10) | (z << 20) | (w << 30);
                             packed[..4].copy_from_slice(&value.to_be_bytes());
                             4
                         }
@@ -3955,23 +3959,31 @@ impl PpcInterpreter {
                         }
                         4 => {
                             for lane in 0..4 {
+                                let raw =
+                                    clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
                                 packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&snorm(floats[lane]).to_be_bytes());
+                                    .copy_from_slice(&raw.to_be_bytes());
                             }
                             8
                         }
                         5 => {
                             for lane in 0..4 {
-                                packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&f32_to_f16_bits(floats[lane]).to_be_bytes());
+                                packed[lane * 2..lane * 2 + 2].copy_from_slice(
+                                    &f32_to_f16_bits_toward_zero(floats[lane]).to_be_bytes(),
+                                );
                             }
                             8
                         }
                         6 => {
-                            let value = unorm(floats[0], 0xF_FFFF) as u64
-                                | ((unorm(floats[1], 0xF_FFFF) as u64) << 20)
-                                | ((unorm(floats[2], 0xF_FFFF) as u64) << 40)
-                                | ((unorm(floats[3], 0xF) as u64) << 60);
+                            let x =
+                                (clamp_bits(floats[0], 0x4038_0001, 0x4047_FFFF) & 0xF_FFFF) as u64;
+                            let y =
+                                (clamp_bits(floats[1], 0x4038_0001, 0x4047_FFFF) & 0xF_FFFF) as u64;
+                            let z =
+                                (clamp_bits(floats[2], 0x4038_0001, 0x4047_FFFF) & 0xF_FFFF) as u64;
+                            let w =
+                                (clamp_bits(floats[3], 0x4040_0000, 0x4040_000F) & 0xF) as u64;
+                            let value = x | (y << 20) | (z << 40) | (w << 60);
                             packed[..8].copy_from_slice(&value.to_be_bytes());
                             8
                         }
@@ -9038,7 +9050,7 @@ mod tests {
                 | (((vd >> 5) & 3) << 2)
                 | ((vb >> 5) & 3)
         };
-        put_instruction(&mut memory, 0x1000, encode_pack(0x46, 0x25, 22, 2)); // vpkd3d128 FLOAT16_4
+        put_instruction(&mut memory, 0x1000, encode_pack(0x46, 0x25, 22, 0)); // vpkd3d128 FLOAT16_4
         put_instruction(&mut memory, 0x1004, encode_unpack(0x47, 0x46, 20)); // vupkd3d128 FLOAT16_4
 
         let mut cpu = fp_enabled_cpu();
@@ -9048,7 +9060,7 @@ mod tests {
         ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
-            &cpu.state.vr[0x46][..8],
+            &cpu.state.vr[0x46][8..],
             &[0x3C, 0, 0xC0, 0, 0x38, 0, 0x44, 0]
         );
         cpu.step(&mut memory).unwrap();
