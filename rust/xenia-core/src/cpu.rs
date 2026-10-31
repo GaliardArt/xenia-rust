@@ -3996,7 +3996,7 @@ impl PpcInterpreter {
                         1 => {
                             let offset = (3 - shift) * 4;
                             output[offset..offset + 4]
-                                .copy_from_slice(&packed[packed_len - 4..packed_len]);
+                                .copy_from_slice(&packed[12..16]);
                         }
                         2 => {
                             if packed_len == 4 {
