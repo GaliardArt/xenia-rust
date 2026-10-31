@@ -2006,13 +2006,18 @@ impl PpcInterpreter {
                     match va_operation {
                         42 => {
                             for lane in 0..16 {
-                                result[lane] = (a[lane] & !control[lane]) | (b[lane] & control[lane]);
+                                result[lane] =
+                                    (a[lane] & !control[lane]) | (b[lane] & control[lane]);
                             }
                         }
                         43 => {
                             for lane in 0..16 {
                                 let selector = (control[lane] & 0x1F) as usize;
-                                result[lane] = if selector < 16 { a[selector] } else { b[selector - 16] };
+                                result[lane] = if selector < 16 {
+                                    a[selector]
+                                } else {
+                                    b[selector - 16]
+                                };
                             }
                         }
                         44 => {
@@ -2025,11 +2030,22 @@ impl PpcInterpreter {
                         46 | 47 => {
                             for lane in 0..4 {
                                 let offset = lane * 4;
-                                let av = f32::from_bits(u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()));
-                                let bv = f32::from_bits(u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()));
-                                let cv = f32::from_bits(u32::from_be_bytes(control[offset..offset + 4].try_into().unwrap()));
-                                let value = if va_operation == 46 { av.mul_add(cv, bv) } else { bv - av * cv };
-                                result[offset..offset + 4].copy_from_slice(&value.to_bits().to_be_bytes());
+                                let av = f32::from_bits(u32::from_be_bytes(
+                                    a[offset..offset + 4].try_into().unwrap(),
+                                ));
+                                let bv = f32::from_bits(u32::from_be_bytes(
+                                    b[offset..offset + 4].try_into().unwrap(),
+                                ));
+                                let cv = f32::from_bits(u32::from_be_bytes(
+                                    control[offset..offset + 4].try_into().unwrap(),
+                                ));
+                                let value = if va_operation == 46 {
+                                    av.mul_add(cv, bv)
+                                } else {
+                                    bv - av * cv
+                                };
+                                result[offset..offset + 4]
+                                    .copy_from_slice(&value.to_bits().to_be_bytes());
                             }
                         }
                         _ => unreachable!(),
@@ -2483,12 +2499,18 @@ impl PpcInterpreter {
                             for lane in 0..(16 / input_width) {
                                 let offset = lane * input_width;
                                 let raw = if word_input {
-                                    u32::from_be_bytes(source[offset..offset + 4].try_into().unwrap()) as u64
+                                    u32::from_be_bytes(
+                                        source[offset..offset + 4].try_into().unwrap(),
+                                    ) as u64
                                 } else {
                                     u16::from_be_bytes([source[offset], source[offset + 1]]) as u64
                                 };
                                 let value = if signed_input {
-                                    if word_input { raw as u32 as i32 as i64 } else { raw as u16 as i16 as i64 }
+                                    if word_input {
+                                        raw as u32 as i32 as i64
+                                    } else {
+                                        raw as u16 as i16 as i64
+                                    }
                                 } else {
                                     raw as i64
                                 };
@@ -2506,7 +2528,8 @@ impl PpcInterpreter {
                                 if output_width == 1 {
                                     result[output] = packed as u8;
                                 } else {
-                                    result[output..output + 2].copy_from_slice(&(packed as u16).to_be_bytes());
+                                    result[output..output + 2]
+                                        .copy_from_slice(&(packed as u16).to_be_bytes());
                                 }
                                 output += output_width;
                             }
@@ -2524,7 +2547,8 @@ impl PpcInterpreter {
                                 let source_lane = if high { lane } else { lane + 4 };
                                 let offset = source_lane * 2;
                                 let value = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
-                                result[lane * 4..lane * 4 + 4].copy_from_slice(&value.to_be_bytes());
+                                result[lane * 4..lane * 4 + 4]
+                                    .copy_from_slice(&value.to_be_bytes());
                             }
                         } else {
                             for lane in 0..8 {
