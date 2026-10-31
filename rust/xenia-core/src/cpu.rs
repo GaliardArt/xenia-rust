@@ -2254,6 +2254,17 @@ impl PpcInterpreter {
                             }
                             self.state.vr[vd] = vector;
                         }
+                        387 => {
+                            let word_address = address & !3;
+                            let lane = ((address & 0xC) >> 2) as usize;
+                            let start = lane * 4;
+                            memory
+                                .write_bytes(
+                                    GuestAddress(word_address),
+                                    &vector[start..start + 4],
+                                )
+                                .map_err(Into::into)?;
+                        }
                         1027 | 1539 => {
                             for (lane, byte) in vector.iter_mut().enumerate() {
                                 *byte = if lane + offset < 16 {
@@ -8887,6 +8898,35 @@ mod tests {
                 Ok(index as u8)
             );
         }
+    }
+
+    #[test]
+    fn vmx128_element_word_store_uses_address_selected_lane() {
+        let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x100);
+        let encode_memory = |selector: u32, vd: u32, ra: u32, rb: u32| {
+            (4 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((ra & 0x1F) << 16)
+                | ((rb & 0x1F) << 11)
+                | (((selector >> 4) & 0x7F) << 4)
+                | (selector & 3)
+                | (((vd >> 5) & 3) << 2)
+        };
+        put_instruction(&mut memory, 0x2000, encode_memory(387, 0x65, 1, 2));
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x2000;
+        cpu.state.gpr[1] = 0x2040;
+        cpu.state.gpr[2] = 0x0B;
+        cpu.state.vr[0x65] = core::array::from_fn(|index| index as u8);
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x2048), 4),
+            Ok(&[8, 9, 10, 11][..])
+        );
+        assert_eq!(cpu.state.vr[0x65], core::array::from_fn(|index| index as u8));
+        assert_eq!(cpu.state.pc, 0x2004);
     }
 
     #[test]
