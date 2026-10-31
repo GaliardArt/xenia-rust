@@ -2008,9 +2008,80 @@ impl PpcInterpreter {
                             self.state.gpr[ra] as u32
                         };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
-                        for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
+                        memory
+                            .write_bytes(GuestAddress(address), &self.state.vr[rt_rs])
+                            .map_err(Into::into)?;
+                    }
+                    519 | 775 => {
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let aligned = address & !0xF;
+                        let offset = (address & 0xF) as usize;
+                        let mut vector = [0; 16];
+                        for (lane, byte) in vector.iter_mut().enumerate() {
+                            if lane + offset < 16 {
+                                *byte = memory
+                                    .read_u8(GuestAddress(aligned.wrapping_add((lane + offset) as u32)))
+                                    .map_err(Into::into)?;
+                            }
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    551 | 807 => {
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let aligned = address & !0xF;
+                        let offset = (address & 0xF) as usize;
+                        let mut vector = [0; 16];
+                        if offset != 0 {
+                            let start = 16 - offset;
+                            for lane in 0..offset {
+                                vector[start + lane] = memory
+                                    .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
+                                    .map_err(Into::into)?;
+                            }
+                        }
+                        self.state.vr[rt_rs] = vector;
+                    }
+                    647 | 903 => {
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let aligned = address & !0xF;
+                        let offset = (address & 0xF) as usize;
+                        memory
+                            .write_bytes(
+                                GuestAddress(aligned.wrapping_add(offset as u32)),
+                                &self.state.vr[rt_rs][..16 - offset],
+                            )
+                            .map_err(Into::into)?;
+                    }
+                    679 | 935 => {
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
+                        let address = base.wrapping_add(self.state.gpr[rb] as u32);
+                        let aligned = address & !0xF;
+                        let offset = (address & 0xF) as usize;
+                        if offset != 0 {
                             memory
-                                .write_u8(GuestAddress(address.wrapping_add(index as u32)), byte)
+                                .write_bytes(
+                                    GuestAddress(aligned),
+                                    &self.state.vr[rt_rs][16 - offset..],
+                                )
                                 .map_err(Into::into)?;
                         }
                     }
@@ -2036,11 +2107,9 @@ impl PpcInterpreter {
                             self.state.gpr[ra] as u32
                         };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
-                        for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
-                            memory
-                                .write_u8(GuestAddress(address.wrapping_add(index as u32)), byte)
-                                .map_err(Into::into)?;
-                        }
+                        memory
+                            .write_bytes(GuestAddress(address), &self.state.vr[rt_rs])
+                            .map_err(Into::into)?;
                     }
                     87 | 119 | 279 | 311 | 343 | 375 | 23 | 55 => {
                         let update = matches!(xo, 119 | 311 | 375 | 55);
@@ -9000,6 +9069,81 @@ mod tests {
             );
             assert_eq!(cpu.state.pc, 0x2000);
         }
+    }
+
+    #[test]
+    fn classic_altivec_partial_vector_loads_and_stores_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x2000);
+        for offset in 0..16 {
+            memory
+                .write_u8(GuestAddress(0x1040 + offset), offset as u8)
+                .unwrap();
+        }
+        let encode = |vd: u32, ra: u32, rb: u32, xo: u32| {
+            (31 << 26) | (vd << 21) | (ra << 16) | (rb << 11) | (xo << 1)
+        };
+        for (index, xo) in [519_u32, 775, 551, 807, 647, 903, 679, 935]
+            .into_iter()
+            .enumerate()
+        {
+            put_instruction(
+                &mut memory,
+                0x2000 + index as u32 * 4,
+                encode(1, 3, 4, xo),
+            );
+        }
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x2000;
+        cpu.state.gpr[3] = 0x1040;
+        cpu.state.gpr[4] = 5;
+        cpu.state.vr[1] = [0xA5; 16];
+
+        cpu.step(&mut memory).unwrap(); // lvlx
+        assert_eq!(
+            cpu.state.vr[1],
+            [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0]
+        );
+        cpu.step(&mut memory).unwrap(); // lvlxl
+        assert_eq!(
+            cpu.state.vr[1],
+            [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0]
+        );
+        cpu.step(&mut memory).unwrap(); // lvrx
+        assert_eq!(
+            cpu.state.vr[1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3,]
+        );
+        cpu.step(&mut memory).unwrap(); // lvrxl
+        assert_eq!(
+            cpu.state.vr[1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3,]
+        );
+
+        cpu.state.vr[1] = core::array::from_fn(|index| index as u8);
+        cpu.step(&mut memory).unwrap(); // stvlx
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1045), 11),
+            Ok(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10][..])
+        );
+        cpu.state.vr[1] = core::array::from_fn(|index| (0xA0 + index) as u8);
+        cpu.step(&mut memory).unwrap(); // stvlxl
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1045), 11),
+            Ok(&[0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA][..])
+        );
+        cpu.state.vr[1] = core::array::from_fn(|index| index as u8);
+        cpu.step(&mut memory).unwrap(); // stvrx
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1040), 5),
+            Ok(&[11, 12, 13, 14, 15][..])
+        );
+        cpu.state.vr[1] = core::array::from_fn(|index| (0xB0 + index) as u8);
+        cpu.step(&mut memory).unwrap(); // stvrxl
+        assert_eq!(
+            memory.read_bytes(GuestAddress(0x1040), 5),
+            Ok(&[0xBB, 0xBC, 0xBD, 0xBE, 0xBF][..])
+        );
     }
 
     #[test]
