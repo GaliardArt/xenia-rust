@@ -2106,6 +2106,22 @@ impl PpcInterpreter {
                             result[lane] = a[lane] ^ b[lane];
                         }
                     }
+                    0b111001 | 0b111101 => {
+                        // vslo128 / vsro128 shift the 128-bit vector by whole bytes.
+                        let shift = (b[15] & 0x78) >> 3;
+                        for lane in 0..16 {
+                            let source_lane = if operation == 0b111001 {
+                                lane + shift as usize
+                            } else {
+                                lane.checked_sub(shift as usize).unwrap_or(usize::MAX)
+                            };
+                            result[lane] = if source_lane < 16 {
+                                a[source_lane]
+                            } else {
+                                0
+                            };
+                        }
+                    }
                     _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
                 }
                 self.state.vr[registers.vd] = result;
@@ -2119,8 +2135,8 @@ impl PpcInterpreter {
                     return Err(PpcError::UnsupportedInstruction { pc, opcode });
                 }
                 // VX128_P has a distinct layout from the three-register VX128 format.
-                let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5))
-                    as usize;
+                let vd =
+                    (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
                 let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
                 let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
                 let source = self.state.vr[vb];
@@ -5188,6 +5204,51 @@ mod tests {
             assert_eq!(cpu.state.vr[0x7D], expected, "operation {operation:#08b}");
             assert_eq!(cpu.state.pc, 0x1004 + index as u32 * 4);
         }
+    }
+
+    #[test]
+    fn vmx128_byte_shifts_cover_left_right_zero_and_extended_registers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_vmx128 = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 0x3) << 2)
+                | (((va >> 5) & 0x1) << 5)
+                | (((va >> 6) & 0x1) << 10)
+                | ((vb >> 5) & 0x3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 0x1) << 4)
+        };
+        put_instruction(
+            &mut memory,
+            0x1000,
+            encode_vmx128(0x7D, 0x72, 0x43, 0b111001),
+        );
+        put_instruction(
+            &mut memory,
+            0x1004,
+            encode_vmx128(0x7D, 0x72, 0x43, 0b111101),
+        );
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        let source = std::array::from_fn(|index| index as u8);
+        cpu.state.vr[0x72] = source;
+        cpu.state.vr[0x43] = [0; 15].into_iter().chain([0x10]).collect::<Vec<_>>().try_into().unwrap();
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[0x7D], [0; 16]);
+
+        cpu.state.vr[0x43][15] = 0x08;
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(cpu.state.pc, 0x1008);
     }
 
     #[test]
