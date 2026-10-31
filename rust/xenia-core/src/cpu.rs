@@ -2146,7 +2146,8 @@ impl PpcInterpreter {
                         }
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            result[offset..offset + 4].copy_from_slice(&sum.to_bits().to_be_bytes());
+                            result[offset..offset + 4]
+                                .copy_from_slice(&sum.to_bits().to_be_bytes());
                         }
                     }
                     0b100001 | 0b100101 | 0b101001 | 0b101101 | 0b110001 => {
