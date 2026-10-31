@@ -2280,6 +2280,45 @@ impl PpcInterpreter {
                             }
                         }
                     }
+                    // Integer/floating-point vector conversions with the VA scaling immediate.
+                    778 | 842 | 906 | 970 => {
+                        let scale = (instruction >> 16) & 0x1F;
+                        let signed = matches!(xo, 842 | 970);
+                        let to_integer = matches!(xo, 906 | 970);
+                        let mut saturated = false;
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            let raw = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                            let value = if to_integer {
+                                let float = f32::from_bits(raw) * 2.0_f32.powi(scale as i32);
+                                if signed {
+                                    if float.is_nan() {
+                                        0
+                                    } else {
+                                        saturated |= !float.is_finite()
+                                            || float < i32::MIN as f32
+                                            || float >= 2_147_483_648.0;
+                                        float.clamp(i32::MIN as f32, i32::MAX as f32) as i32 as u32
+                                    }
+                                } else {
+                                    if float.is_nan() || float < 0.0 {
+                                        saturated = true;
+                                        0
+                                    } else {
+                                        saturated |= !float.is_finite() || float >= 4_294_967_296.0;
+                                        float.min(u32::MAX as f32) as u32
+                                    }
+                                }
+                            } else {
+                                let number = if signed { raw as i32 as f32 } else { raw as f32 };
+                                (number / 2.0_f32.powi(scale as i32)).to_bits()
+                            };
+                            result[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+                        }
+                        if saturated {
+                            self.state.vscr |= 1 << 31;
+                        }
+                    }
                     // Vector floating-point arithmetic, estimates and rounding.
                     10 | 74 | 266 | 330 | 394 | 458 | 522 | 586 | 650 | 714 | 1034 | 1098 => {
                         for lane in 0..4 {
