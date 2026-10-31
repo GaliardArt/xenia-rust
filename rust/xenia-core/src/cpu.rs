@@ -2021,14 +2021,14 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let aligned = address & !0xF;
                         let offset = (address & 0xF) as usize;
+                        let mut loaded = [0; 16];
+                        memory
+                            .read_bytes(GuestAddress(aligned), &mut loaded)
+                            .map_err(Into::into)?;
                         let mut vector = [0; 16];
-                        for (lane, byte) in vector.iter_mut().enumerate() {
+                        for lane in 0..16 {
                             if lane + offset < 16 {
-                                *byte = memory
-                                    .read_u8(GuestAddress(
-                                        aligned.wrapping_add((lane + offset) as u32),
-                                    ))
-                                    .map_err(Into::into)?;
+                                vector[lane] = loaded[lane + offset];
                             }
                         }
                         self.state.vr[rt_rs] = vector;
@@ -2044,12 +2044,11 @@ impl PpcInterpreter {
                         let offset = (address & 0xF) as usize;
                         let mut vector = [0; 16];
                         if offset != 0 {
-                            let start = 16 - offset;
-                            for lane in 0..offset {
-                                vector[start + lane] = memory
-                                    .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
-                                    .map_err(Into::into)?;
-                            }
+                            let mut loaded = [0; 16];
+                            memory
+                                .read_bytes(GuestAddress(aligned), &mut loaded)
+                                .map_err(Into::into)?;
+                            vector[16 - offset..].copy_from_slice(&loaded[..offset]);
                         }
                         self.state.vr[rt_rs] = vector;
                     }
@@ -2339,28 +2338,26 @@ impl PpcInterpreter {
                                 .map_err(Into::into)?;
                         }
                         1027 | 1539 => {
-                            for (lane, byte) in vector.iter_mut().enumerate() {
-                                *byte = if lane + offset < 16 {
-                                    memory
-                                        .read_u8(GuestAddress(
-                                            aligned.wrapping_add((lane + offset) as u32),
-                                        ))
-                                        .map_err(Into::into)?
-                                } else {
-                                    0
-                                };
+                            let mut loaded = [0; 16];
+                            memory
+                                .read_bytes(GuestAddress(aligned), &mut loaded)
+                                .map_err(Into::into)?;
+                            vector = [0; 16];
+                            for lane in 0..16 {
+                                if lane + offset < 16 {
+                                    vector[lane] = loaded[lane + offset];
+                                }
                             }
                             self.state.vr[vd] = vector;
                         }
                         1091 | 1603 => {
                             vector = [0; 16];
                             if offset != 0 {
-                                let start = 16 - offset;
-                                for lane in 0..offset {
-                                    vector[start + lane] = memory
-                                        .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
-                                        .map_err(Into::into)?;
-                                }
+                                let mut loaded = [0; 16];
+                                memory
+                                    .read_bytes(GuestAddress(aligned), &mut loaded)
+                                    .map_err(Into::into)?;
+                                vector[16 - offset..].copy_from_slice(&loaded[..offset]);
                             }
                             self.state.vr[vd] = vector;
                         }
