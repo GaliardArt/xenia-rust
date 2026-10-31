@@ -8177,7 +8177,9 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[2],
-            [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+            [
+                11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26
+            ]
         );
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.vr[3][5], 5);
