@@ -3921,8 +3921,9 @@ impl PpcInterpreter {
                         }
                         3 => {
                             for lane in 0..2 {
-                                packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&f32_to_f16_bits_toward_zero(floats[lane]).to_be_bytes());
+                                packed[lane * 2..lane * 2 + 2].copy_from_slice(
+                                    &f32_to_f16_bits_toward_zero(floats[lane]).to_be_bytes(),
+                                );
                             }
                             4
                         }
