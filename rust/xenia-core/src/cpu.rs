@@ -8973,4 +8973,70 @@ mod tests {
         assert_eq!(&cpu.state.vr[vd as usize][8..12], &[0, 0, 0, 0xB2]);
         assert_eq!(&cpu.state.vr[vd as usize][12..16], &[0xA3, 0, 0, 0]);
     }
+
+    #[test]
+    fn altivec_multiply_sum_families_preserve_signedness_and_saturation() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
+        let encode = |xo: u32| {
+            (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | (4 << 6) | xo
+        };
+        for (index, xo) in [36_u32, 37, 38, 39, 40, 41].into_iter().enumerate() {
+            put_instruction(&mut memory, 0x1000 + index as u64 * 4, encode(xo));
+        }
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+
+        // vmsumubm: (1*2 + 2*3 + 3*4 + 4*5) + 10 = 50.
+        cpu.state.vr[2] = [1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4];
+        cpu.state.vr[3] = [2, 3, 4, 5, 2, 3, 4, 5, 2, 3, 4, 5, 2, 3, 4, 5];
+        cpu.state.vr[4] = [0; 16];
+        for lane in 0..4 {
+            cpu.state.vr[4][lane * 4..lane * 4 + 4].copy_from_slice(&10_u32.to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 50);
+
+        // vmsummbm: signed bytes from VA times unsigned bytes from VB.
+        cpu.state.pc = 0x1004;
+        cpu.state.vr[2] = [0xFF, 2, 0xFD, 4; 4];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 22);
+
+        // vmsumuhm: unsigned halfword products, modulo 2^32.
+        cpu.state.pc = 0x1008;
+        cpu.state.vr[2] = [0, 2, 0, 3, 0, 2, 0, 3, 0, 2, 0, 3, 0, 2, 0, 3];
+        cpu.state.vr[3] = [0, 4, 0, 5, 0, 4, 0, 5, 0, 4, 0, 5, 0, 4, 0, 5];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), 33);
+
+        // vmsumuhs saturates an unsigned halfword sum to UINT32_MAX.
+        cpu.state.pc = 0x100C;
+        cpu.state.vr[2] = [0xFF; 16];
+        cpu.state.vr[3] = [0xFF; 16];
+        cpu.state.vr[4] = [0xFF; 16];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), u32::MAX);
+        assert_ne!(cpu.state.vscr & (1 << 31), 0);
+
+        // vmsumshm: signed halfword products, modulo 2^32.
+        cpu.state.pc = 0x1010;
+        cpu.state.vr[2] = [0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3, 0xFF, 0xFE, 0, 3];
+        cpu.state.vr[3] = [0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB, 0, 4, 0xFF, 0xFB];
+        cpu.state.vr[4] = [0; 16];
+        for lane in 0..4 {
+            cpu.state.vr[4][lane * 4..lane * 4 + 4].copy_from_slice(&10_u32.to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), (-13_i32) as u32);
+
+        // vmsumshs saturates a signed halfword sum to INT32_MIN.
+        cpu.state.pc = 0x1014;
+        cpu.state.vr[2] = [0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80, 0];
+        cpu.state.vr[3] = [0x7F, 0xFF; 8];
+        cpu.state.vr[4] = [0xC4, 0x65, 0x36, 0x00; 4]; // -1,000,000,000
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(u32::from_be_bytes(cpu.state.vr[1][..4].try_into().unwrap()), i32::MIN as u32);
+        assert_ne!(cpu.state.vscr & (1 << 31), 0);
+    }
 }
