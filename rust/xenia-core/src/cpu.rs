@@ -8371,7 +8371,9 @@ mod tests {
 
         cpu.step(&mut memory).unwrap();
 
-        assert_eq!(cpu.state.vr[0x41], [1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12]);
+        assert_eq!(
+            cpu.state.vr[0x41],
+            [1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12]
+        );
     }
-
 }
