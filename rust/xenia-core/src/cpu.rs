@@ -2011,12 +2011,14 @@ impl PpcInterpreter {
                                 let offset = lane * 2;
                                 let av = i16::from_be_bytes([a[offset], a[offset + 1]]) as i32;
                                 let bv = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
-                                let cv = i16::from_be_bytes([control[offset], control[offset + 1]]) as i32;
+                                let cv = i16::from_be_bytes([control[offset], control[offset + 1]])
+                                    as i32;
                                 let bias = if round { 0x4000 } else { 0 };
                                 let value = ((av * bv + bias) >> 15) + cv;
                                 let clamped = value.clamp(i16::MIN as i32, i16::MAX as i32);
                                 saturated |= value != clamped;
-                                result[offset..offset + 2].copy_from_slice(&(clamped as i16).to_be_bytes());
+                                result[offset..offset + 2]
+                                    .copy_from_slice(&(clamped as i16).to_be_bytes());
                             }
                             if saturated {
                                 self.state.vscr |= 1 << 31;
@@ -2027,9 +2029,11 @@ impl PpcInterpreter {
                                 let offset = lane * 2;
                                 let av = u16::from_be_bytes([a[offset], a[offset + 1]]) as u32;
                                 let bv = u16::from_be_bytes([b[offset], b[offset + 1]]) as u32;
-                                let cv = u16::from_be_bytes([control[offset], control[offset + 1]]) as u32;
-                                result[offset..offset + 2]
-                                    .copy_from_slice(&(av.wrapping_mul(bv).wrapping_add(cv) as u16).to_be_bytes());
+                                let cv = u16::from_be_bytes([control[offset], control[offset + 1]])
+                                    as u32;
+                                result[offset..offset + 2].copy_from_slice(
+                                    &(av.wrapping_mul(bv).wrapping_add(cv) as u16).to_be_bytes(),
+                                );
                             }
                         }
                         36..=41 => {
@@ -2042,17 +2046,39 @@ impl PpcInterpreter {
                                 let mut sum = 0_i64;
                                 if byte_products {
                                     for item in 0..4 {
-                                        let av = if signed_a { a[offset + item] as i8 as i64 } else { a[offset + item] as i64 };
-                                        let bv = if signed_b { b[offset + item] as i8 as i64 } else { b[offset + item] as i64 };
+                                        let av = if signed_a {
+                                            a[offset + item] as i8 as i64
+                                        } else {
+                                            a[offset + item] as i64
+                                        };
+                                        let bv = if signed_b {
+                                            b[offset + item] as i8 as i64
+                                        } else {
+                                            b[offset + item] as i64
+                                        };
                                         sum += av * bv;
                                     }
                                 } else {
                                     for item in 0..2 {
                                         let item_offset = offset + item * 2;
-                                        let av_raw = u16::from_be_bytes([a[item_offset], a[item_offset + 1]]);
-                                        let bv_raw = u16::from_be_bytes([b[item_offset], b[item_offset + 1]]);
-                                        let av = if signed_a { av_raw as i16 as i64 } else { av_raw as i64 };
-                                        let bv = if signed_b { bv_raw as i16 as i64 } else { bv_raw as i64 };
+                                        let av_raw = u16::from_be_bytes([
+                                            a[item_offset],
+                                            a[item_offset + 1],
+                                        ]);
+                                        let bv_raw = u16::from_be_bytes([
+                                            b[item_offset],
+                                            b[item_offset + 1],
+                                        ]);
+                                        let av = if signed_a {
+                                            av_raw as i16 as i64
+                                        } else {
+                                            av_raw as i64
+                                        };
+                                        let bv = if signed_b {
+                                            bv_raw as i16 as i64
+                                        } else {
+                                            bv_raw as i64
+                                        };
                                         sum += av * bv;
                                     }
                                 }
@@ -2066,15 +2092,29 @@ impl PpcInterpreter {
                                 };
                                 let exact = sum + accumulator;
                                 let value = if saturating {
-                                    let min = if signed_a || signed_b { i32::MIN as i64 } else { 0 };
-                                    let max = if signed_a || signed_b { i32::MAX as i64 } else { u32::MAX as i64 };
+                                    let min = if signed_a || signed_b {
+                                        i32::MIN as i64
+                                    } else {
+                                        0
+                                    };
+                                    let max = if signed_a || signed_b {
+                                        i32::MAX as i64
+                                    } else {
+                                        u32::MAX as i64
+                                    };
                                     exact.clamp(min, max) as u32
                                 } else {
                                     exact as u32
                                 };
-                                if saturating && exact != value as i32 as i64 && (signed_a || signed_b) {
+                                if saturating
+                                    && exact != value as i32 as i64
+                                    && (signed_a || signed_b)
+                                {
                                     self.state.vscr |= 1 << 31;
-                                } else if saturating && !(signed_a || signed_b) && exact > u32::MAX as i64 {
+                                } else if saturating
+                                    && !(signed_a || signed_b)
+                                    && exact > u32::MAX as i64
+                                {
                                     self.state.vscr |= 1 << 31;
                                 }
                                 result[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
@@ -2386,7 +2426,11 @@ impl PpcInterpreter {
                                     }
                                 }
                             } else {
-                                let number = if signed { raw as i32 as f32 } else { raw as f32 };
+                                let number = if signed {
+                                    raw as i32 as f32
+                                } else {
+                                    raw as f32
+                                };
                                 (number / 2.0_f32.powi(scale as i32)).to_bits()
                             };
                             result[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
@@ -7900,13 +7944,13 @@ mod tests {
 
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
-        cpu.state.vr[2] = [
-            0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 6, 0, 0, 0, 8,
-        ];
+        cpu.state.vr[2] = [0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 6, 0, 0, 0, 8];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[1],
-            [0x3F, 0x80, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0, 0x40, 0x80, 0, 0]
+            [
+                0x3F, 0x80, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0, 0x40, 0x80, 0, 0
+            ]
         );
 
         cpu.state.vr[2] = [
@@ -7927,5 +7971,4 @@ mod tests {
             [0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 9]
         );
     }
-
 }
