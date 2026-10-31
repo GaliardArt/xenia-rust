@@ -7812,4 +7812,44 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn classic_altivec_integer_float_conversions_apply_scale_and_saturation() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode = |vd: u32, scale: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (scale << 16) | (vb << 11) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode(1, 1, 2, 778)); // vcfux
+        put_instruction(&mut memory, 0x1004, encode(1, 1, 2, 842)); // vcfsx
+        put_instruction(&mut memory, 0x1008, encode(1, 1, 2, 970)); // vctsxs
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [
+            0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 6, 0, 0, 0, 8,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [0x3F, 0x80, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0, 0x40, 0x80, 0, 0]
+        );
+
+        cpu.state.vr[2] = [
+            0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 6, 0, 0, 0, 8,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [0x3F, 0, 0, 0, 0x40, 0, 0, 0, 0x40, 0x40, 0, 0, 0x40, 0x80, 0, 0]
+        );
+
+        cpu.state.vr[2] = [
+            0x3F, 0xC0, 0, 0, 0x40, 0x20, 0, 0, 0x40, 0x60, 0, 0, 0x40, 0x90, 0, 0,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 9]
+        );
+    }
+
 }
