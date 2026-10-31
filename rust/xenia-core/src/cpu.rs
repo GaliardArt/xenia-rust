@@ -2607,20 +2607,30 @@ impl PpcInterpreter {
                         46 | 47 => {
                             for lane in 0..4 {
                                 let offset = lane * 4;
-                                let av = f32::from_bits(u32::from_be_bytes(
-                                    a[offset..offset + 4].try_into().unwrap(),
-                                ));
-                                let bv = f32::from_bits(u32::from_be_bytes(
-                                    b[offset..offset + 4].try_into().unwrap(),
-                                ));
-                                let cv = f32::from_bits(u32::from_be_bytes(
-                                    control[offset..offset + 4].try_into().unwrap(),
-                                ));
+                                let av = flush_vscr_nj_denormal(
+                                    f32::from_bits(u32::from_be_bytes(
+                                        a[offset..offset + 4].try_into().unwrap(),
+                                    )),
+                                    self.state.vscr,
+                                );
+                                let bv = flush_vscr_nj_denormal(
+                                    f32::from_bits(u32::from_be_bytes(
+                                        b[offset..offset + 4].try_into().unwrap(),
+                                    )),
+                                    self.state.vscr,
+                                );
+                                let cv = flush_vscr_nj_denormal(
+                                    f32::from_bits(u32::from_be_bytes(
+                                        control[offset..offset + 4].try_into().unwrap(),
+                                    )),
+                                    self.state.vscr,
+                                );
                                 let value = if va_operation == 46 {
                                     av.mul_add(cv, bv)
                                 } else {
                                     bv - av * cv
                                 };
+                                let value = flush_vscr_nj_denormal(value, self.state.vscr);
                                 result[offset..offset + 4]
                                     .copy_from_slice(&value.to_bits().to_be_bytes());
                             }
@@ -8977,6 +8987,44 @@ mod tests {
             [0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18, 0, 0, 0, 18]
         );
     }
+    #[test]
+    fn vscr_non_java_mode_flushes_denormal_inputs_and_underflow_results() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        put_instruction(&mut memory, 0x1000, encode_vx(1, 2, 3, 10)); // vaddfp
+        put_instruction(&mut memory, 0x1004, encode_vx(4, 0, 5, 266)); // vrefp
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = [
+            0, 0, 0, 1, 0x80, 0, 0, 1, 0x3F, 0x80, 0, 0, 0x3F, 0x80, 0, 0,
+        ];
+        cpu.state.vr[3] = [0; 16];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[1][..4], &[0, 0, 0, 1]);
+        assert_eq!(&cpu.state.vr[1][4..8], &[0x80, 0, 0, 1]);
+
+        cpu.state.vscr = 1 << 15;
+        cpu.state.pc = 0x1000;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[1][..4], &[0, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[1][4..8], &[0x80, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[1][8..12], &[0x3F, 0x80, 0, 0]);
+
+        cpu.state.vr[5] = [
+            0x7F, 0x7F, 0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0xFF,
+            0x40, 0, 0, 0, 0x3F, 0, 0, 0,
+        ];
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[4][..4], &[0, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[4][4..8], &[0x80, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[4][8..12], &[0x3F, 0, 0, 0]);
+        assert_eq!(&cpu.state.vr[4][12..16], &[0x40, 0, 0, 0]);
+    }
+
     #[test]
     fn altivec_packed_pixel_operations_match_reference_lane_order() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
