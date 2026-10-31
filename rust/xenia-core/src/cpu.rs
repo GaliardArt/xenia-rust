@@ -2249,28 +2249,49 @@ impl PpcInterpreter {
                         }
                     }
                     // Saturating integer arithmetic and carry-out operations.
-                    384 | 1408 | 512 | 576 | 640 | 768 | 832 | 896 | 1536 | 1600 | 1664 | 1792 | 1856 | 1920 => {
+                    384 | 1408 | 512 | 576 | 640 | 768 | 832 | 896 | 1536 | 1600 | 1664 | 1792
+                    | 1856 | 1920 => {
                         if xo == 384 || xo == 1408 {
                             for lane in 0..4 {
                                 let offset = lane * 4;
-                                let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
-                                let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
-                                let carry = if xo == 384 { (av as u64 + bv as u64) >> 32 } else { (av >= bv) as u64 };
-                                result[offset..offset + 4].copy_from_slice(&(carry as u32).to_be_bytes());
+                                let av =
+                                    u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                                let bv =
+                                    u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                                let carry = if xo == 384 {
+                                    (av as u64 + bv as u64) >> 32
+                                } else {
+                                    (av >= bv) as u64
+                                };
+                                result[offset..offset + 4]
+                                    .copy_from_slice(&(carry as u32).to_be_bytes());
                             }
                         } else {
-                            let width = if matches!(xo, 512 | 768 | 1536 | 1792) { 1 }
-                                else if matches!(xo, 576 | 832 | 1600 | 1856) { 2 } else { 4 };
+                            let width = if matches!(xo, 512 | 768 | 1536 | 1792) {
+                                1
+                            } else if matches!(xo, 576 | 832 | 1600 | 1856) {
+                                2
+                            } else {
+                                4
+                            };
                             let signed = matches!(xo, 768 | 832 | 896 | 1792 | 1856 | 1920);
                             let subtract = xo >= 1536;
                             let mut saturated = false;
                             for offset in (0..16).step_by(width) {
                                 let (av, bv) = match width {
                                     1 => (a[offset] as u64, b[offset] as u64),
-                                    2 => (u16::from_be_bytes([a[offset], a[offset + 1]]) as u64,
-                                          u16::from_be_bytes([b[offset], b[offset + 1]]) as u64),
-                                    _ => (u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()) as u64,
-                                          u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()) as u64),
+                                    2 => (
+                                        u16::from_be_bytes([a[offset], a[offset + 1]]) as u64,
+                                        u16::from_be_bytes([b[offset], b[offset + 1]]) as u64,
+                                    ),
+                                    _ => (
+                                        u32::from_be_bytes(
+                                            a[offset..offset + 4].try_into().unwrap(),
+                                        ) as u64,
+                                        u32::from_be_bytes(
+                                            b[offset..offset + 4].try_into().unwrap(),
+                                        ) as u64,
+                                    ),
                                 };
                                 let bits = (width * 8) as u32;
                                 let raw = if signed {
@@ -2289,7 +2310,12 @@ impl PpcInterpreter {
                                 } else {
                                     let max = (1_u64 << bits) - 1;
                                     let exact = if subtract {
-                                        if av < bv { saturated = true; 0 } else { av - bv }
+                                        if av < bv {
+                                            saturated = true;
+                                            0
+                                        } else {
+                                            av - bv
+                                        }
                                     } else {
                                         let sum = av + bv;
                                         saturated |= sum > max;
@@ -2299,26 +2325,41 @@ impl PpcInterpreter {
                                 };
                                 match width {
                                     1 => result[offset] = raw as u8,
-                                    2 => result[offset..offset + 2].copy_from_slice(&(raw as u16).to_be_bytes()),
-                                    _ => result[offset..offset + 4].copy_from_slice(&(raw as u32).to_be_bytes()),
+                                    2 => result[offset..offset + 2]
+                                        .copy_from_slice(&(raw as u16).to_be_bytes()),
+                                    _ => result[offset..offset + 4]
+                                        .copy_from_slice(&(raw as u32).to_be_bytes()),
                                 }
                             }
-                            if saturated { self.state.vscr |= 1 << 31; }
+                            if saturated {
+                                self.state.vscr |= 1 << 31;
+                            }
                         }
                     }
                     // Rounded averages across byte, halfword and word lanes.
                     1026 | 1090 | 1154 | 1282 | 1346 | 1410 => {
-                        let width = if matches!(xo, 1026 | 1282) { 1 }
-                            else if matches!(xo, 1090 | 1346) { 2 } else { 4 };
+                        let width = if matches!(xo, 1026 | 1282) {
+                            1
+                        } else if matches!(xo, 1090 | 1346) {
+                            2
+                        } else {
+                            4
+                        };
                         let signed = matches!(xo, 1282 | 1346 | 1410);
                         for offset in (0..16).step_by(width) {
                             let bits = (width * 8) as u32;
                             let (av, bv) = match width {
                                 1 => (a[offset] as u64, b[offset] as u64),
-                                2 => (u16::from_be_bytes([a[offset], a[offset + 1]]) as u64,
-                                      u16::from_be_bytes([b[offset], b[offset + 1]]) as u64),
-                                _ => (u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap()) as u64,
-                                      u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap()) as u64),
+                                2 => (
+                                    u16::from_be_bytes([a[offset], a[offset + 1]]) as u64,
+                                    u16::from_be_bytes([b[offset], b[offset + 1]]) as u64,
+                                ),
+                                _ => (
+                                    u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap())
+                                        as u64,
+                                    u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap())
+                                        as u64,
+                                ),
                             };
                             let value = if signed {
                                 let (av, bv) = if bits == 8 {
@@ -2334,14 +2375,20 @@ impl PpcInterpreter {
                             };
                             match width {
                                 1 => result[offset] = value as u8,
-                                2 => result[offset..offset + 2].copy_from_slice(&(value as u16).to_be_bytes()),
-                                _ => result[offset..offset + 4].copy_from_slice(&(value as u32).to_be_bytes()),
+                                2 => result[offset..offset + 2]
+                                    .copy_from_slice(&(value as u16).to_be_bytes()),
+                                _ => result[offset..offset + 4]
+                                    .copy_from_slice(&(value as u32).to_be_bytes()),
                             }
                         }
                     }
                     // Even/odd widening vector multiplies.
                     8 | 72 | 264 | 328 | 520 | 584 | 776 | 840 => {
-                        let width = if matches!(xo, 8 | 264 | 520 | 776) { 1 } else { 2 };
+                        let width = if matches!(xo, 8 | 264 | 520 | 776) {
+                            1
+                        } else {
+                            2
+                        };
                         let signed = matches!(xo, 264 | 328 | 776 | 840);
                         let odd = matches!(xo, 8 | 72 | 264 | 328);
                         let output_width = width * 2;
@@ -2349,20 +2396,34 @@ impl PpcInterpreter {
                             let input_lane = lane * 2 + usize::from(odd);
                             let input_offset = input_lane * width;
                             let product = if width == 1 {
-                                let av = if signed { a[input_offset] as i8 as i32 } else { a[input_offset] as i32 };
-                                let bv = if signed { b[input_offset] as i8 as i32 } else { b[input_offset] as i32 };
+                                let av = if signed {
+                                    a[input_offset] as i8 as i32
+                                } else {
+                                    a[input_offset] as i32
+                                };
+                                let bv = if signed {
+                                    b[input_offset] as i8 as i32
+                                } else {
+                                    b[input_offset] as i32
+                                };
                                 av * bv
                             } else {
                                 let av = u16::from_be_bytes([a[input_offset], a[input_offset + 1]]);
                                 let bv = u16::from_be_bytes([b[input_offset], b[input_offset + 1]]);
-                                let (av, bv) = if signed { (av as i16 as i32, bv as i16 as i32) } else { (av as i32, bv as i32) };
+                                let (av, bv) = if signed {
+                                    (av as i16 as i32, bv as i16 as i32)
+                                } else {
+                                    (av as i32, bv as i32)
+                                };
                                 av * bv
                             };
                             let output_offset = lane * output_width;
                             if output_width == 2 {
-                                result[output_offset..output_offset + 2].copy_from_slice(&(product as i16 as u16).to_be_bytes());
+                                result[output_offset..output_offset + 2]
+                                    .copy_from_slice(&(product as i16 as u16).to_be_bytes());
                             } else {
-                                result[output_offset..output_offset + 4].copy_from_slice(&(product as u32).to_be_bytes());
+                                result[output_offset..output_offset + 4]
+                                    .copy_from_slice(&(product as u32).to_be_bytes());
                             }
                         }
                     }
