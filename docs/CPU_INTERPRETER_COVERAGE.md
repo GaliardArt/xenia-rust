@@ -98,10 +98,13 @@ VMX128 must be resolved per entry before a denominator is meaningful.
 - **Differentially validated:** outputs and side effects match a trusted reference
   for deterministic vectors.
 
-As of this audit, the repository HEAD is
-`97484a7e8a645cdea356765a3576f104078c1a2a`. GitHub reports no status checks
-and no associated workflow runs for that commit. Therefore no claim is made
-here that the current VMX tests passed in CI or were executed locally.
+Validation update (2026-10-31): the VMX vector-store atomicity changes and
+their regression tests are included in `57bcaf6314f49c44d62afb6ea8a2beb605fe8870`.
+GitHub Actions completed the Rust rewrite workflow successfully for this commit:
+format check, `cargo test --workspace --locked`, Clippy with warnings denied,
+and CLI help smoke test all passed. This validates the current workspace test
+suite, but it is not a per-opcode differential test against Xenon hardware or a
+complete VMX/VMX128 conformance certification.
 
 ## Correctness risks found during inspection
 
