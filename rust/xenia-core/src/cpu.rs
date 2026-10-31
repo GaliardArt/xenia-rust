@@ -8006,8 +8006,9 @@ mod tests {
 
         cpu.state.vr[2] = [1; 16];
         cpu.state.vr[3] = [2; 16];
-        cpu.state.vr[4] = [0; 16];
-        cpu.state.vr[4][12..16].copy_from_slice(&10_u32.to_be_bytes());
+        cpu.state.vr[4] = [
+            0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10,
+        ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[1],
