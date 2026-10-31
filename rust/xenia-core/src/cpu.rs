@@ -2935,7 +2935,6 @@ impl PpcInterpreter {
                                 _ => unreachable!(),
                             };
                             let value = flush_vscr_nj_denormal(value, self.state.vscr);
-                            let value = flush_vscr_nj_denormal(value, self.state.vscr);
                             result[offset..offset + 4]
                                 .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
@@ -3594,6 +3593,7 @@ impl PpcInterpreter {
                                 0b010101 => (-av).mul_add(dv, bv),
                                 _ => unreachable!(),
                             };
+                            let value = flush_vscr_nj_denormal(value, self.state.vscr);
                             result[offset..offset + 4]
                                 .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
