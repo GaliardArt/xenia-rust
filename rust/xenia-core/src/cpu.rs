@@ -9033,19 +9033,21 @@ mod tests {
                 | (selector & 3)
                 | (((vd >> 5) & 3) << 2)
         };
-        put_instruction(&mut memory, 0x2000, encode_memory(195, 0x65, 1, 2)); // lvx128
-        put_instruction(&mut memory, 0x2004, encode_memory(67, 0x66, 1, 2)); // lvsr128
-        put_instruction(&mut memory, 0x2008, encode_memory(451, 0x65, 1, 3)); // stvx128
+        put_instruction(&mut memory, 0x2000, encode_memory(131, 0x64, 1, 2)); // lvewx128
+        put_instruction(&mut memory, 0x2004, encode_memory(195, 0x65, 1, 2)); // lvx128
+        put_instruction(&mut memory, 0x2008, encode_memory(67, 0x66, 1, 2)); // lvsr128
+        put_instruction(&mut memory, 0x200C, encode_memory(451, 0x65, 1, 3)); // stvx128
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x2000;
         cpu.state.gpr[1] = 0x2040;
         cpu.state.gpr[2] = 3;
         cpu.state.gpr[3] = 0x10;
 
-        for _ in 0..3 {
+        for _ in 0..4 {
             cpu.step(&mut memory).unwrap();
         }
 
+        assert_eq!(cpu.state.vr[0x64], core::array::from_fn(|i| i as u8));
         assert_eq!(cpu.state.vr[0x65], core::array::from_fn(|i| i as u8));
         assert_eq!(cpu.state.vr[0x66], core::array::from_fn(|i| (13 + i) as u8));
         for index in 0..16 {
@@ -9095,7 +9097,7 @@ mod tests {
                 | ((vd & 0x1F) << 21)
                 | ((ra & 0x1F) << 16)
                 | ((rb & 0x1F) << 11)
-                | (((selector >> 2) & 0x7F) << 4)
+                | (((selector >> 4) & 0x7F) << 4)
                 | (selector & 3)
                 | (((vd >> 5) & 3) << 2)
         };
