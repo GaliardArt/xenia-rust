@@ -2454,7 +2454,7 @@ impl PpcInterpreter {
                                 ));
                                 let above = av > bv;
                                 let below = av < -bv || av.is_nan() || bv.is_nan();
-                                let mask = (if above { 0x8000_0000 } else { 0 })
+                                let mask: u32 = (if above { 0x8000_0000 } else { 0 })
                                     | (if below { 0x4000_0000 } else { 0 });
                                 result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes());
                                 all_true &= mask == 0;
