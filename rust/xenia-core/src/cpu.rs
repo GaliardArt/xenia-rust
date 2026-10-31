@@ -2000,10 +2000,79 @@ impl PpcInterpreter {
                 // VA-format AltiVec operations carry a fourth vector operand
                 // or an immediate in bits 6..10.
                 let va_operation = instruction & 0x3F;
-                if matches!(va_operation, 42 | 43 | 44 | 46 | 47) {
+                if matches!(va_operation, 32..=34 | 36..=47) {
                     let vc = ((instruction >> 6) & 0x1F) as usize;
                     let control = self.state.vr[vc];
                     match va_operation {
+                        32 | 33 => {
+                            let round = va_operation == 33;
+                            let mut saturated = false;
+                            for lane in 0..8 {
+                                let offset = lane * 2;
+                                let av = i16::from_be_bytes([a[offset], a[offset + 1]]) as i32;
+                                let bv = i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
+                                let cv = i16::from_be_bytes([control[offset], control[offset + 1]]) as i32;
+                                let bias = if round { 0x4000 } else { 0 };
+                                let value = (av * bv + cv + bias) >> 15;
+                                let clamped = value.clamp(i16::MIN as i32, i16::MAX as i32);
+                                saturated |= value != clamped;
+                                result[offset..offset + 2].copy_from_slice(&(clamped as i16).to_be_bytes());
+                            }
+                            if saturated {
+                                self.state.vscr |= 1 << 31;
+                            }
+                        }
+                        34 => {
+                            for lane in 0..8 {
+                                let offset = lane * 2;
+                                let av = u16::from_be_bytes([a[offset], a[offset + 1]]) as u32;
+                                let bv = u16::from_be_bytes([b[offset], b[offset + 1]]) as u32;
+                                let cv = u16::from_be_bytes([control[offset], control[offset + 1]]) as u32;
+                                result[offset..offset + 2]
+                                    .copy_from_slice(&(av.wrapping_mul(bv).wrapping_add(cv) as u16).to_be_bytes());
+                            }
+                        }
+                        36..=41 => {
+                            let byte_products = matches!(va_operation, 36 | 37);
+                            let signed_a = va_operation == 37 || matches!(va_operation, 40 | 41);
+                            let signed_b = matches!(va_operation, 40 | 41);
+                            let saturating = matches!(va_operation, 39 | 41);
+                            for lane in 0..4 {
+                                let offset = lane * 4;
+                                let mut sum = 0_i64;
+                                if byte_products {
+                                    for item in 0..4 {
+                                        let av = if signed_a { a[offset + item] as i8 as i64 } else { a[offset + item] as i64 };
+                                        let bv = if signed_b { b[offset + item] as i8 as i64 } else { b[offset + item] as i64 };
+                                        sum += av * bv;
+                                    }
+                                } else {
+                                    for item in 0..2 {
+                                        let item_offset = offset + item * 2;
+                                        let av_raw = u16::from_be_bytes([a[item_offset], a[item_offset + 1]]);
+                                        let bv_raw = u16::from_be_bytes([b[item_offset], b[item_offset + 1]]);
+                                        let av = if signed_a { av_raw as i16 as i64 } else { av_raw as i64 };
+                                        let bv = if signed_b { bv_raw as i16 as i64 } else { bv_raw as i64 };
+                                        sum += av * bv;
+                                    }
+                                }
+                                let accumulator = u32::from_be_bytes(control[offset..offset + 4].try_into().unwrap()) as i32 as i64;
+                                let exact = sum + accumulator;
+                                let value = if saturating {
+                                    let min = if signed_a || signed_b { i32::MIN as i64 } else { 0 };
+                                    let max = if signed_a || signed_b { i32::MAX as i64 } else { u32::MAX as i64 };
+                                    exact.clamp(min, max) as u32
+                                } else {
+                                    exact as u32
+                                };
+                                if saturating && exact != value as i32 as i64 && (signed_a || signed_b) {
+                                    self.state.vscr |= 1 << 31;
+                                } else if saturating && !(signed_a || signed_b) && exact > u32::MAX as i64 {
+                                    self.state.vscr |= 1 << 31;
+                                }
+                                result[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+                            }
+                        }
                         42 => {
                             for lane in 0..16 {
                                 result[lane] =
