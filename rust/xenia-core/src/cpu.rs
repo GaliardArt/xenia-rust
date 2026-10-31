@@ -2014,10 +2014,8 @@ impl PpcInterpreter {
                     0x080 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av =
-                                    u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
-                            let bv =
-                                    u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                            let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                            let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                             result[offset..offset + 4]
                                 .copy_from_slice(&av.wrapping_add(bv).to_be_bytes());
                         }
@@ -2106,7 +2104,8 @@ impl PpcInterpreter {
                 }
 
                 match operation {
-                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 => {
+                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101
+                    | 0b011001 | 0b011101 => {
                         // Four IEEE-754 binary32 lanes. Fused multiply-add variants
                         // use the destination as the third source, as specified by VX128.
                         let destination = self.state.vr[registers.vd];
@@ -2126,7 +2125,7 @@ impl PpcInterpreter {
                                 0b000101 => av - bv,
                                 0b001001 => av * bv,
                                 0b001101 | 0b010001 => av.mul_add(dv, bv),
-                                0b010101 => bv - av * dv,
+                                0b010101 => (-av).mul_add(dv, bv),
                                 _ => unreachable!(),
                             };
                             result[offset..offset + 4]
@@ -2364,8 +2363,10 @@ impl PpcInterpreter {
                             let mut all_false = true;
                             for lane in 0..4 {
                                 let offset = lane * 4;
-                                let av = u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
-                                let bv = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
+                                let av =
+                                    u32::from_be_bytes(a[offset..offset + 4].try_into().unwrap());
+                                let bv =
+                                    u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                                 let af = f32::from_bits(av);
                                 let bf = f32::from_bits(bv);
                                 let (mask, condition) = if compare_operation == 0b000110 {
