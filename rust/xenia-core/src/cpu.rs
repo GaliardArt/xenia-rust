@@ -1826,7 +1826,11 @@ impl PpcInterpreter {
                         self.state.vr[rt_rs] = vector;
                     }
                     7 | 39 | 71 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let mut vector = self.state.vr[rt_rs];
                         match xo {
@@ -1856,7 +1860,11 @@ impl PpcInterpreter {
                         self.state.vr[rt_rs] = vector;
                     }
                     135 | 167 | 199 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let vector = self.state.vr[rt_rs];
                         match xo {
@@ -1887,7 +1895,11 @@ impl PpcInterpreter {
                         }
                     }
                     359 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         let mut vector = [0_u8; 16];
                         for (index, byte) in vector.iter_mut().enumerate() {
@@ -1898,7 +1910,11 @@ impl PpcInterpreter {
                         self.state.vr[rt_rs] = vector;
                     }
                     487 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
                             memory
