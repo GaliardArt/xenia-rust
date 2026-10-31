@@ -1807,10 +1807,18 @@ impl PpcInterpreter {
                         }
                     }
                     6 | 38 => {
-                        let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                        let base = if ra == 0 {
+                            0
+                        } else {
+                            self.state.gpr[ra] as u32
+                        };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32);
                         let offset = (address & 0xF) as u8;
-                        let start = if xo == 6 { offset } else { 16_u8.wrapping_sub(offset) };
+                        let start = if xo == 6 {
+                            offset
+                        } else {
+                            16_u8.wrapping_sub(offset)
+                        };
                         let mut vector = [0_u8; 16];
                         for (lane, byte) in vector.iter_mut().enumerate() {
                             *byte = start.wrapping_add(lane as u8);
@@ -1824,17 +1832,24 @@ impl PpcInterpreter {
                         match xo {
                             7 => {
                                 let lane = (address & 0xF) as usize;
-                                vector[lane] = memory.read_u8(GuestAddress(address)).map_err(Into::into)?;
+                                vector[lane] =
+                                    memory.read_u8(GuestAddress(address)).map_err(Into::into)?;
                             }
                             39 => {
                                 let lane = ((address & 0xE) >> 1) as usize;
-                                let value = memory.read_u16_be(GuestAddress(address)).map_err(Into::into)?;
-                                vector[lane * 2..lane * 2 + 2].copy_from_slice(&value.to_be_bytes());
+                                let value = memory
+                                    .read_u16_be(GuestAddress(address))
+                                    .map_err(Into::into)?;
+                                vector[lane * 2..lane * 2 + 2]
+                                    .copy_from_slice(&value.to_be_bytes());
                             }
                             71 => {
                                 let lane = ((address & 0xC) >> 2) as usize;
-                                let value = memory.read_u32_be(GuestAddress(address)).map_err(Into::into)?;
-                                vector[lane * 4..lane * 4 + 4].copy_from_slice(&value.to_be_bytes());
+                                let value = memory
+                                    .read_u32_be(GuestAddress(address))
+                                    .map_err(Into::into)?;
+                                vector[lane * 4..lane * 4 + 4]
+                                    .copy_from_slice(&value.to_be_bytes());
                             }
                             _ => unreachable!(),
                         }
@@ -1847,17 +1862,26 @@ impl PpcInterpreter {
                         match xo {
                             135 => {
                                 let lane = (address & 0xF) as usize;
-                                memory.write_u8(GuestAddress(address), vector[lane]).map_err(Into::into)?;
+                                memory
+                                    .write_u8(GuestAddress(address), vector[lane])
+                                    .map_err(Into::into)?;
                             }
                             167 => {
                                 let lane = ((address & 0xE) >> 1) as usize;
-                                let value = u16::from_be_bytes([vector[lane * 2], vector[lane * 2 + 1]]);
-                                memory.write_u16_be(GuestAddress(address), value).map_err(Into::into)?;
+                                let value =
+                                    u16::from_be_bytes([vector[lane * 2], vector[lane * 2 + 1]]);
+                                memory
+                                    .write_u16_be(GuestAddress(address), value)
+                                    .map_err(Into::into)?;
                             }
                             199 => {
                                 let lane = ((address & 0xC) >> 2) as usize;
-                                let value = u32::from_be_bytes(vector[lane * 4..lane * 4 + 4].try_into().unwrap());
-                                memory.write_u32_be(GuestAddress(address), value).map_err(Into::into)?;
+                                let value = u32::from_be_bytes(
+                                    vector[lane * 4..lane * 4 + 4].try_into().unwrap(),
+                                );
+                                memory
+                                    .write_u32_be(GuestAddress(address), value)
+                                    .map_err(Into::into)?;
                             }
                             _ => unreachable!(),
                         }
@@ -1867,7 +1891,9 @@ impl PpcInterpreter {
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         let mut vector = [0_u8; 16];
                         for (index, byte) in vector.iter_mut().enumerate() {
-                            *byte = memory.read_u8(GuestAddress(address.wrapping_add(index as u32))).map_err(Into::into)?;
+                            *byte = memory
+                                .read_u8(GuestAddress(address.wrapping_add(index as u32)))
+                                .map_err(Into::into)?;
                         }
                         self.state.vr[rt_rs] = vector;
                     }
@@ -1875,7 +1901,9 @@ impl PpcInterpreter {
                         let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
                         let address = base.wrapping_add(self.state.gpr[rb] as u32) & !0xF;
                         for (index, byte) in self.state.vr[rt_rs].iter().copied().enumerate() {
-                            memory.write_u8(GuestAddress(address.wrapping_add(index as u32)), byte).map_err(Into::into)?;
+                            memory
+                                .write_u8(GuestAddress(address.wrapping_add(index as u32)), byte)
+                                .map_err(Into::into)?;
                         }
                     }
                     103 => {
@@ -2179,10 +2207,8 @@ impl PpcInterpreter {
                                     exact as u32
                                 };
                                 if saturating
-                                    && ((signed_a || signed_b)
-                                        && exact != value as i32 as i64
-                                        || !(signed_a || signed_b)
-                                            && exact > u32::MAX as i64)
+                                    && ((signed_a || signed_b) && exact != value as i32 as i64
+                                        || !(signed_a || signed_b) && exact > u32::MAX as i64)
                                 {
                                     self.state.vscr |= 1 << 31;
                                 }
@@ -8104,7 +8130,9 @@ mod tests {
     fn altivec_vector_alignment_and_element_memory_operations_execute() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x2000);
         for offset in 0..0x100 {
-            memory.write_u8(GuestAddress(0x1000 + offset), offset as u8).unwrap();
+            memory
+                .write_u8(GuestAddress(0x1000 + offset), offset as u8)
+                .unwrap();
         }
         let encode = |vd: u32, ra: u32, rb: u32, xo: u32| {
             (31 << 26) | (vd << 21) | (ra << 16) | (rb << 11) | (xo << 1)
@@ -8126,9 +8154,15 @@ mod tests {
         cpu.state.vr[5] = [0xCC; 16];
 
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.vr[1], [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
+        assert_eq!(
+            cpu.state.vr[1],
+            [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        );
         cpu.step(&mut memory).unwrap();
-        assert_eq!(cpu.state.vr[2], [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+        assert_eq!(
+            cpu.state.vr[2],
+            [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+        );
         cpu.step(&mut memory).unwrap();
         assert_eq!(cpu.state.vr[3][5], 5);
         assert_eq!(cpu.state.vr[3][4], 0xAA);
@@ -8141,5 +8175,4 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
     }
-
 }
