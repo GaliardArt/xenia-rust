@@ -55,6 +55,14 @@ fn round_shift_right_even(value: u32, shift: u32) -> u32 {
 }
 
 #[cfg(test)]
+fn flush_vscr_nj_denormal(value: f32, vscr: u32) -> f32 {
+    if vscr & (1 << 15) != 0 && value.is_subnormal() {
+        f32::from_bits(value.to_bits() & 0x8000_0000)
+    } else {
+        value
+    }
+}
+
 fn f32_to_f16_bits(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
@@ -2859,7 +2867,10 @@ impl PpcInterpreter {
                             let offset = lane * 4;
                             let raw = u32::from_be_bytes(b[offset..offset + 4].try_into().unwrap());
                             let value = if to_integer {
-                                let float = f32::from_bits(raw) * 2.0_f32.powi(scale as i32);
+                                let float = flush_vscr_nj_denormal(
+                                    f32::from_bits(raw),
+                                    self.state.vscr,
+                                ) * 2.0_f32.powi(scale as i32);
                                 if signed {
                                     if float.is_nan() {
                                         0
@@ -2896,12 +2907,18 @@ impl PpcInterpreter {
                     10 | 74 | 266 | 330 | 394 | 458 | 522 | 586 | 650 | 714 | 1034 | 1098 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
-                            let av = f32::from_bits(u32::from_be_bytes(
-                                a[offset..offset + 4].try_into().unwrap(),
-                            ));
-                            let bv = f32::from_bits(u32::from_be_bytes(
-                                b[offset..offset + 4].try_into().unwrap(),
-                            ));
+                            let av = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    a[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
+                            let bv = flush_vscr_nj_denormal(
+                                f32::from_bits(u32::from_be_bytes(
+                                    b[offset..offset + 4].try_into().unwrap(),
+                                )),
+                                self.state.vscr,
+                            );
                             let value = match xo {
                                 10 => av + bv,
                                 74 => av - bv,
@@ -2917,6 +2934,7 @@ impl PpcInterpreter {
                                 1098 => av.min(bv),
                                 _ => unreachable!(),
                             };
+                            let value = flush_vscr_nj_denormal(value, self.state.vscr);
                             result[offset..offset + 4]
                                 .copy_from_slice(&value.to_bits().to_be_bytes());
                         }
@@ -3266,12 +3284,18 @@ impl PpcInterpreter {
                         if xo == 966 {
                             for lane in 0..4 {
                                 let offset = lane * 4;
-                                let av = f32::from_bits(u32::from_be_bytes(
-                                    a[offset..offset + 4].try_into().unwrap(),
-                                ));
-                                let bv = f32::from_bits(u32::from_be_bytes(
-                                    b[offset..offset + 4].try_into().unwrap(),
-                                ));
+                                let av = flush_vscr_nj_denormal(
+                                    f32::from_bits(u32::from_be_bytes(
+                                        a[offset..offset + 4].try_into().unwrap(),
+                                    )),
+                                    self.state.vscr,
+                                );
+                                let bv = flush_vscr_nj_denormal(
+                                    f32::from_bits(u32::from_be_bytes(
+                                        b[offset..offset + 4].try_into().unwrap(),
+                                    )),
+                                    self.state.vscr,
+                                );
                                 let unordered = av.is_nan() || bv.is_nan();
                                 let above = av > bv || unordered;
                                 let below = av < -bv || unordered;
@@ -3324,12 +3348,18 @@ impl PpcInterpreter {
                                     }
                                     _ => {
                                         if fp {
-                                            let av = f32::from_bits(u32::from_be_bytes(
-                                                a[offset..offset + 4].try_into().unwrap(),
-                                            ));
-                                            let bv = f32::from_bits(u32::from_be_bytes(
-                                                b[offset..offset + 4].try_into().unwrap(),
-                                            ));
+                                            let av = flush_vscr_nj_denormal(
+                                                f32::from_bits(u32::from_be_bytes(
+                                                    a[offset..offset + 4].try_into().unwrap(),
+                                                )),
+                                                self.state.vscr,
+                                            );
+                                            let bv = flush_vscr_nj_denormal(
+                                                f32::from_bits(u32::from_be_bytes(
+                                                    b[offset..offset + 4].try_into().unwrap(),
+                                                )),
+                                                self.state.vscr,
+                                            );
                                             let yes = if equal {
                                                 av == bv
                                             } else if greater_equal {
