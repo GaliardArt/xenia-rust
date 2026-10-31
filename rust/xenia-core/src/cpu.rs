@@ -7101,6 +7101,51 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_vcmpbfp_sets_nan_masks_and_record_summary() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let vd = 0x41_u32;
+        let va = 0x22_u32;
+        let vb = 0x35_u32;
+        let instruction = (6 << 26)
+            | ((vd & 0x1F) << 21)
+            | ((va & 0x1F) << 16)
+            | ((vb & 0x1F) << 11)
+            | (3 << 7)
+            | (1 << 6)
+            | (((vd >> 5) & 3) << 2)
+            | (((va >> 5) & 1) << 5)
+            | (((va >> 6) & 1) << 10)
+            | ((vb >> 5) & 3);
+        put_instruction(&mut memory, 0x1000, instruction);
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        let a = [0.0_f32, 2.0, -2.0, f32::NAN];
+        let b = [1.0_f32; 4];
+        for lane in 0..4 {
+            cpu.state.vr[va as usize][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&a[lane].to_bits().to_be_bytes());
+            cpu.state.vr[vb as usize][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&b[lane].to_bits().to_be_bytes());
+        }
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[vd as usize],
+            [0, 0, 0, 0, 0x80, 0, 0, 0, 0x40, 0, 0, 0, 0xC0, 0, 0, 0]
+        );
+        assert_eq!(cpu.state.cr[6], 0b0100);
+
+        cpu.state.pc = 0x1000;
+        for lane in 0..4 {
+            cpu.state.vr[va as usize][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&0.0_f32.to_bits().to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[6], 0b0010);
+    }
+
+    #[test]
     fn vmx128_word_shifts_and_comparisons_execute_on_extended_registers() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
         let encode_shift = |vd: u32, va: u32, vb: u32, operation: u32| {
