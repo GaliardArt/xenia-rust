@@ -87,14 +87,15 @@ The audit verified these decoder families:
 3. **`vrlimi128`:** corrected rotation to rotate whole 32-bit words across the
    vector, not bytes within each word. Regression expectations now use the
    reference word rotation.
-4. **`vcmpbfp` and `vcmpbfp128`:** NaN lanes now set both high result bits, and
+4. **`vpkd3d128` word placement:** corrected the packed low-word placement and the mode/shift byte selection to mirror Xenia's `MakePermuteMask` controls, including the special shift-3 cases for 32-bit and 64-bit packed formats. Regression tests cover these selector combinations.
+5. **`vcmpbfp` and `vcmpbfp128`:** NaN lanes now set both high result bits, and
    CR6 record summaries are based on the out-of-bounds predicate. Added tests for
    NaN masks and all-in/all-out/mixed summaries.
-5. **Classic partial vector memory:** implemented `lvlx/lvlxl`, `lvrx/lvrxl`,
+6. **Classic partial vector memory:** implemented `lvlx/lvlxl`, `lvrx/lvrxl`,
    `stvlx/stvlxl`, and `stvrx/stvrxl`. Partial loads read the full aligned block;
    partial stores use full-block read/modify/write, matching the reference emitter's
    memory shape. Full vector stores use contiguous writes.
-6. **Contiguous memory interface:** `GuestMemoryAccess` now has caller-buffer
+7. **Contiguous memory interface:** `GuestMemoryAccess` now has caller-buffer
    `read_bytes` and `write_bytes` operations. The concrete `GuestMemory` checks the
    complete range before copying. Default trait fallbacks remain sequential, so
    future mapped/MMIO backends must override them where all-range behavior is
@@ -120,7 +121,7 @@ The audit verified these decoder families:
    contiguous ranges. The trait's default `read_bytes`/`write_bytes` implementations
    are sequential; another backend must override them to guarantee the same
    transaction/fault behavior.
-6. **Per-instruction tests:** 186 workspace tests pass, but there is not yet one
+6. **Per-instruction tests:** 189 workspace tests pass, but there is not yet one
    independent deterministic test for every mnemonic, operand form, immediate
    value, record variant, and boundary condition. The CSV intentionally marks
    per-mnemonic and differential validation as unverified.
@@ -135,8 +136,8 @@ The audit verified these decoder families:
   trusted Xenon/reference oracle for deterministic vectors.
 
 Validation update (2026-10-31): commit
-`f9fc76d18f056a7d2faf45ddeba99f43ccaf397f` passed the Rust rewrite GitHub
-Actions workflow. Formatting, `cargo test --workspace --locked` (186 tests),
+`4514d31a174d8f46ba5bcd254e1666d7ac8b036d` passed the Rust rewrite GitHub
+Actions workflow. Formatting, `cargo test --workspace --locked` (189 tests),
 Clippy with warnings denied, and CLI help smoke test all passed. This validates
 the workspace suite, not per-opcode differential conformance or hardware accuracy.
 ## Correctness risks found during inspection
