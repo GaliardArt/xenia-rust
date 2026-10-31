@@ -6988,4 +6988,65 @@ mod tests {
         assert_eq!(cpu.state.fpr[1], 5.0);
         assert_eq!(cpu.state.pc, 0x1004);
     }
+
+    #[test]
+    fn vmx128_unary_conversions_rounding_and_splats_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_unary = |vd: u32, vb: u32, immediate: u32, operation: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+                | (operation << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode_unary(0x7D, 0x43, 1, 0b0101011)); // vcsxwfp128
+        put_instruction(&mut memory, 0x1004, encode_unary(0x7D, 0x43, 2, 0b1110011)); // vspltw128
+        put_instruction(&mut memory, 0x1008, encode_unary(0x7D, 0x43, 0, 0b0110011)); // vrfim128
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x43] = [
+            0x00, 0x00, 0x00, 0x02,
+            0xFF, 0xFF, 0xFF, 0xFE,
+            0x00, 0x00, 0x00, 0x03,
+            0x00, 0x00, 0x00, 0x04,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0x3F, 0x80, 0x00, 0x00,
+                0xBF, 0x80, 0x00, 0x00,
+                0x40, 0x40, 0x00, 0x00,
+                0x40, 0x80, 0x00, 0x00,
+            ]
+        );
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03,
+             0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03]
+        );
+
+        cpu.state.vr[0x43] = [
+            0x3F, 0xC0, 0x00, 0x00, // 1.5
+            0xBF, 0xC0, 0x00, 0x00, // -1.5
+            0x40, 0x60, 0x00, 0x00, // 3.5
+            0xC0, 0x60, 0x00, 0x00, // -3.5
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x7D],
+            [
+                0x40, 0x00, 0x00, 0x00, // floor(1.5) = 1
+                0xC0, 0x00, 0x00, 0x00, // floor(-1.5) = -2
+                0x40, 0x80, 0x00, 0x00, // floor(3.5) = 3
+                0xC0, 0x80, 0x00, 0x00, // floor(-3.5) = -4
+            ]
+        );
+    }
+
 }
