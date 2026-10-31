@@ -21,12 +21,12 @@ pub struct Vmx128RegisterFields {
 /// VD and VB have 2 extension bits, while VA has a distinct 6th and 7th bit.
 pub fn decode_vmx128_register_fields(instruction: u32) -> Vmx128RegisterFields {
     let vd_low = ((instruction >> 21) & 0x1F) as usize;
-    let va_low = ((instruction >> 11) & 0x1F) as usize;
-    let vb_low = ((instruction >> 16) & 0x1F) as usize;
-    let vd_high = ((instruction >> 28) & 0x3) as usize;
-    let va_high = ((instruction >> 26) & 0x1) as usize;
-    let va_top = ((instruction >> 21) & 0x1) as usize;
-    let vb_high = ((instruction >> 30) & 0x3) as usize;
+    let va_low = ((instruction >> 16) & 0x1F) as usize;
+    let vb_low = ((instruction >> 11) & 0x1F) as usize;
+    let vd_high = ((instruction >> 2) & 0x3) as usize;
+    let va_high = ((instruction >> 5) & 0x1) as usize;
+    let va_top = ((instruction >> 10) & 0x1) as usize;
+    let vb_high = (instruction & 0x3) as usize;
 
     Vmx128RegisterFields {
         vd: vd_low | (vd_high << 5),
@@ -2922,7 +2922,7 @@ mod tests {
         let decoded = decode_vmx128_register_fields(instruction);
 
         assert_eq!(decoded.vd, 0x7D);
-        assert_eq!(decoded.va, 0x52);
+        assert_eq!(decoded.va, 0x72);
         assert_eq!(decoded.vb, 0x43);
     }
 
