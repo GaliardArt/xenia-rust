@@ -8523,5 +8523,4 @@ mod tests {
         assert_eq!(f16_bits_to_f32(0x0001), 2.0_f32.powi(-24));
         assert!(f16_bits_to_f32(0x7E00).is_nan());
     }
-
 }
