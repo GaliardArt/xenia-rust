@@ -3279,7 +3279,7 @@ impl PpcInterpreter {
                                 }
                             }
                             1608 => {
-                                for lane in 0..4 {
+                                for (lane, word) in words.iter_mut().enumerate() {
                                     let offset = lane * 4;
                                     let first =
                                         i16::from_be_bytes([a[offset], a[offset + 1]]) as i64;
