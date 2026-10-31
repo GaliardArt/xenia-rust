@@ -8928,6 +8928,57 @@ mod tests {
         );
     }
     #[test]
+    fn altivec_packed_pixel_operations_match_reference_lane_order() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
+        let encode = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | (xo << 1)
+        };
+        put_instruction(&mut memory, 0x1000, encode(5, 3, 4, 782)); // vpkpx
+        put_instruction(&mut memory, 0x1004, encode(6, 0, 4, 846)); // vupkhpx
+        put_instruction(&mut memory, 0x1008, encode(7, 0, 4, 974)); // vupklpx
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[3] = [
+            0x00, 0x10, 0x18, 0x20, 0x01, 0x28, 0x30, 0x38,
+            0x00, 0x40, 0x48, 0x50, 0x01, 0x58, 0x60, 0x68,
+        ];
+        cpu.state.vr[4] = [
+            0x01, 0x70, 0x78, 0x80, 0x00, 0x88, 0x90, 0x98,
+            0x01, 0xA0, 0xA8, 0xB0, 0x00, 0xB8, 0xC0, 0xC8,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[5],
+            [
+                0x08, 0x64, 0x94, 0xC7, 0x21, 0x2A, 0xAD, 0x8D,
+                0xB9, 0xF0, 0x46, 0x53, 0xD2, 0xB6, 0x5F, 0x19,
+            ]
+        );
+
+        cpu.state.vr[4] = [
+            0xFF, 0xFF, 0x80, 0x00, 0x7C, 0x00, 0x03, 0xE0,
+            0x00, 0x1F, 0x42, 0x10, 0x21, 0x08, 0x7F, 0xFF,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[6],
+            [
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0,
+                0, 0xFF, 0, 0, 0, 0xFF, 0, 0,
+            ]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[7],
+            [
+                0, 0, 0, 0xFF, 0, 0x84, 0x84, 0x84,
+                0, 0x42, 0x42, 0x42, 0, 0xFF, 0xFF, 0xFF,
+            ]
+        );
+    }
+
+    #[test]
     fn altivec_vector_alignment_and_element_memory_operations_execute() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 0x2000);
         for offset in 0..0x100 {
