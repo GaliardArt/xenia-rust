@@ -2165,14 +2165,31 @@ impl PpcInterpreter {
                 let memory_selector = (((instruction >> 4) & 0x7F) << 2) | (instruction & 0x3);
                 if matches!(
                     memory_selector,
-                    3 | 67 | 131 | 195 | 387 | 451 | 707 | 963 | 1027 | 1091 | 1283
-                        | 1347 | 1539 | 1603 | 1795 | 1859
+                    3 | 67
+                        | 131
+                        | 195
+                        | 387
+                        | 451
+                        | 707
+                        | 963
+                        | 1027
+                        | 1091
+                        | 1283
+                        | 1347
+                        | 1539
+                        | 1603
+                        | 1795
+                        | 1859
                 ) {
-                    let vd = (((instruction >> 21) & 0x1F)
-                        | (((instruction >> 2) & 0x3) << 5)) as usize;
+                    let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5))
+                        as usize;
                     let ra = ((instruction >> 16) & 0x1F) as usize;
                     let rb = ((instruction >> 11) & 0x1F) as usize;
-                    let base = if ra == 0 { 0 } else { self.state.gpr[ra] as u32 };
+                    let base = if ra == 0 {
+                        0
+                    } else {
+                        self.state.gpr[ra] as u32
+                    };
                     let address = base.wrapping_add(self.state.gpr[rb] as u32);
                     let aligned = address & !0xF;
                     let offset = (address & 0xF) as usize;
@@ -2203,7 +2220,9 @@ impl PpcInterpreter {
                             for lane in 0..16 {
                                 vector[lane] = if lane + offset < 16 {
                                     memory
-                                        .read_u8(GuestAddress(aligned.wrapping_add((lane + offset) as u32)))
+                                        .read_u8(GuestAddress(
+                                            aligned.wrapping_add((lane + offset) as u32),
+                                        ))
                                         .map_err(Into::into)?
                                 } else {
                                     0
@@ -3228,7 +3247,11 @@ impl PpcInterpreter {
                                     let mut sum = 0_i64;
                                     for item in 0..4 {
                                         let value = a[offset + item];
-                                        sum += if xo == 1544 { value as i64 } else { value as i8 as i64 };
+                                        sum += if xo == 1544 {
+                                            value as i64
+                                        } else {
+                                            value as i8 as i64
+                                        };
                                     }
                                     let accumulator = u32::from_be_bytes(
                                         b[offset..offset + 4].try_into().unwrap(),
@@ -3250,14 +3273,18 @@ impl PpcInterpreter {
                             1608 => {
                                 for lane in 0..4 {
                                     let offset = lane * 4;
-                                    let first = i16::from_be_bytes([a[offset], a[offset + 1]]) as i64;
-                                    let second = i16::from_be_bytes([a[offset + 2], a[offset + 3]]) as i64;
+                                    let first =
+                                        i16::from_be_bytes([a[offset], a[offset + 1]]) as i64;
+                                    let second =
+                                        i16::from_be_bytes([a[offset + 2], a[offset + 3]]) as i64;
                                     let accumulator = u32::from_be_bytes(
                                         b[offset..offset + 4].try_into().unwrap(),
-                                    ) as i32 as i64;
+                                    ) as i32
+                                        as i64;
                                     let exact = first + second + accumulator;
                                     saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
-                                    words[lane] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                                    words[lane] =
+                                        exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
                                 }
                             }
                             1672 => {
@@ -3283,7 +3310,8 @@ impl PpcInterpreter {
                                         a[lane * 4..lane * 4 + 4].try_into().unwrap(),
                                     ) as i32 as i64;
                                 }
-                                let accumulator = u32::from_be_bytes(b[12..16].try_into().unwrap()) as i32 as i64;
+                                let accumulator =
+                                    u32::from_be_bytes(b[12..16].try_into().unwrap()) as i32 as i64;
                                 let exact = sum + accumulator;
                                 saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
                                 words[3] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
