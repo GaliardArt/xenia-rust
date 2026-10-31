@@ -8308,4 +8308,69 @@ mod tests {
         cpu.step(&mut memory).unwrap();
         assert_eq!(memory.read_u8(GuestAddress(0x1005)).unwrap(), 0xE5);
     }
+    #[test]
+    fn vmx128_d3d_half_pack_unpack_and_rotate_insert_execute() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_pack = |vd: u32, vb: u32, immediate: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (6 << 8)
+                | (1 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        let encode_unpack = |vd: u32, vb: u32, immediate: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((immediate & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (0b1111111 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        put_instruction(&mut memory, 0x1000, encode_pack(0x46, 0x25, 20)); // vpkd3d128 FLOAT16_4
+        put_instruction(&mut memory, 0x1004, encode_unpack(0x47, 0x46, 20)); // vupkd3d128 FLOAT16_4
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x25] = [
+            0x3F, 0x80, 0, 0, 0xC0, 0, 0, 0, 0x3F, 0, 0, 0, 0x40, 0x80, 0, 0,
+        ];
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            &cpu.state.vr[0x46][..8],
+            &[0x3C, 0, 0xC0, 0, 0x38, 0, 0x44, 0]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x47],
+            [
+                0x3F, 0x80, 0, 0, 0xC0, 0, 0, 0, 0x3F, 0, 0, 0, 0x40, 0x80, 0, 0,
+            ]
+        );
+    }
+
+    #[test]
+    fn vmx128_rvlmi_uses_its_distinct_opcode_selector_and_extended_registers() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let instruction = (6 << 26)
+            | (0x41 << 21)
+            | (0x1F << 11)
+            | (0b111 << 8)
+            | (1 << 7)
+            | (1 << 4)
+            | (1 << 2);
+        put_instruction(&mut memory, 0x1000, instruction);
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x41] = [0xAA; 16];
+        cpu.state.vr[0x01] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
+        cpu.step(&mut memory).unwrap();
+
+        assert_eq!(cpu.state.vr[0x41], [1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12]);
+    }
+
 }
