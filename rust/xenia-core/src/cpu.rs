@@ -3954,10 +3954,8 @@ impl PpcInterpreter {
                         }
                         4 => {
                             for lane in 0..4 {
-                                let raw =
-                                    clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
-                                packed[lane * 2..lane * 2 + 2]
-                                    .copy_from_slice(&raw.to_be_bytes());
+                                let raw = clamp_bits(floats[lane], 0x403F_8001, 0x4040_7FFF) as u16;
+                                packed[lane * 2..lane * 2 + 2].copy_from_slice(&raw.to_be_bytes());
                             }
                             8
                         }
@@ -9060,7 +9058,12 @@ mod tests {
                 [0x4040_0003, 0x403F_FFFF, 0x4040_0100, 0x3F80_0002],
             ),
             (
-                [1.0007_f32.to_bits(), (-1.0007_f32).to_bits(), 0, 0x3F80_0000],
+                [
+                    1.0007_f32.to_bits(),
+                    (-1.0007_f32).to_bits(),
+                    0,
+                    0x3F80_0000,
+                ],
                 [0x3F80_0000, 0xBF80_0000, 0, 0x3F80_0000],
             ),
             (
@@ -9104,7 +9107,10 @@ mod tests {
                 expected_bytes[lane * 4..lane * 4 + 4]
                     .copy_from_slice(&expected[lane].to_be_bytes());
             }
-            assert_eq!(cpu.state.vr[0x47], expected_bytes, "D3D pack type {pack_type}");
+            assert_eq!(
+                cpu.state.vr[0x47], expected_bytes,
+                "D3D pack type {pack_type}"
+            );
         }
     }
 
