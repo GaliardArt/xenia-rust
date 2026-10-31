@@ -2113,7 +2113,8 @@ impl PpcInterpreter {
             }
             // Xenon VMX128 word permutation with an 8-bit immediate.
             6 => {
-                let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
+                let vd =
+                    (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
                 let vb = (((instruction >> 11) & 0x1F) | ((instruction & 0x3) << 5)) as usize;
                 let permutation = ((instruction >> 16) & 0x1F) | (((instruction >> 6) & 0x7) << 5);
                 let source = self.state.vr[vb];
