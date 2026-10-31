@@ -8,6 +8,33 @@ use core::cmp::Ordering;
 use crate::address_space::AddressSpaceError;
 use crate::memory::{GuestAddress, GuestMemoryAccess, MemoryError};
 
+/// Decoded register operands for the Xenon VMX128 three-register format.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Vmx128RegisterFields {
+    pub vd: usize,
+    pub va: usize,
+    pub vb: usize,
+}
+
+/// Extracts VMX128 register indices using the Xenon-specific split high bits.
+///
+/// VD and VB have 2 extension bits, while VA has a distinct 6th and 7th bit.
+pub fn decode_vmx128_register_fields(instruction: u32) -> Vmx128RegisterFields {
+    let vd_low = ((instruction >> 21) & 0x1F) as usize;
+    let va_low = ((instruction >> 11) & 0x1F) as usize;
+    let vb_low = ((instruction >> 16) & 0x1F) as usize;
+    let vd_high = ((instruction >> 28) & 0x3) as usize;
+    let va_high = ((instruction >> 26) & 0x1) as usize;
+    let va_top = ((instruction >> 21) & 0x1) as usize;
+    let vb_high = ((instruction >> 30) & 0x3) as usize;
+
+    Vmx128RegisterFields {
+        vd: vd_low | (vd_high << 5),
+        va: va_low | (va_high << 5) | (va_top << 6),
+        vb: vb_low | (vb_high << 5),
+    }
+}
+
 /// PowerPC MSR floating-point exception mode bits in Xenon's 64-bit MSR.
 pub const PPC_MSR_FE0: u64 = 1 << 11;
 pub const PPC_MSR_FE1: u64 = 1 << 8;
@@ -2882,6 +2909,39 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn vmx128_register_decode_reconstructs_split_extension_bits() {
+        // Encode VD=0x7D, VA=0x52, VB=0x43 using the upstream VX128 layout.
+        let instruction = (0x1D_u32 << 21)
+            | (0x12_u32 << 11)
+            | (0x03_u32 << 16)
+            | (0x3_u32 << 28)
+            | (0x1_u32 << 26)
+            | (0x1_u32 << 21)
+            | (0x2_u32 << 30);
+        let decoded = decode_vmx128_register_fields(instruction);
+
+        assert_eq!(decoded.vd, 0x7D);
+        assert_eq!(decoded.va, 0x52);
+        assert_eq!(decoded.vb, 0x43);
+    }
+
+    #[test]
+    fn vmx128_register_decode_reaches_all_128_register_indices() {
+        let instruction = (0x1F_u32 << 21)
+            | (0x1F_u32 << 11)
+            | (0x1F_u32 << 16)
+            | (0x3_u32 << 28)
+            | (0x1_u32 << 26)
+            | (0x1_u32 << 21)
+            | (0x3_u32 << 30);
+        let decoded = decode_vmx128_register_fields(instruction);
+
+        assert_eq!(decoded.vd, 0x7F);
+        assert_eq!(decoded.va, 0x7F);
+        assert_eq!(decoded.vb, 0x7F);
+    }
+
     fn vmx_wrapping_add_and_subtract_cover_byte_halfword_and_word_lanes() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
         let encode_vmx = |vd: u32, va: u32, vb: u32, xo: u32| {
