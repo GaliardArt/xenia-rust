@@ -8847,12 +8847,8 @@ mod tests {
 
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
-        cpu.state.vr[vd as usize] = [
-            0xA0, 0, 0, 0, 0xA1, 0, 0, 0, 0xA2, 0, 0, 0, 0xA3, 0, 0, 0,
-        ];
-        cpu.state.vr[vb as usize] = [
-            0xB0, 0, 0, 0, 0xB1, 0, 0, 0, 0xB2, 0, 0, 0, 0xB3, 0, 0, 0,
-        ];
+        cpu.state.vr[vd as usize] = [0xA0, 0, 0, 0, 0xA1, 0, 0, 0, 0xA2, 0, 0, 0, 0xA3, 0, 0, 0];
+        cpu.state.vr[vb as usize] = [0xB0, 0, 0, 0, 0xB1, 0, 0, 0, 0xB2, 0, 0, 0, 0xB3, 0, 0, 0];
 
         cpu.step(&mut memory).unwrap();
 
