@@ -3162,13 +3162,15 @@ impl PpcInterpreter {
                                 let bv = f32::from_bits(u32::from_be_bytes(
                                     b[offset..offset + 4].try_into().unwrap(),
                                 ));
-                                let above = av > bv;
-                                let below = av < -bv || av.is_nan() || bv.is_nan();
+                                let unordered = av.is_nan() || bv.is_nan();
+                                let above = av > bv || unordered;
+                                let below = av < -bv || unordered;
                                 let mask: u32 = (if above { 0x8000_0000 } else { 0 })
                                     | (if below { 0x4000_0000 } else { 0 });
                                 result[offset..offset + 4].copy_from_slice(&mask.to_be_bytes());
-                                all_true &= mask == 0;
-                                all_false &= mask == 0xC000_0000;
+                                let out_of_bounds = mask != 0;
+                                all_true &= out_of_bounds;
+                                all_false &= !out_of_bounds;
                             }
                         } else {
                             for offset in (0..16).step_by(width) {
@@ -3968,11 +3970,12 @@ impl PpcInterpreter {
                                 let af = f32::from_bits(av);
                                 let bf = f32::from_bits(bv);
                                 let (mask, condition) = if compare_operation == 0b011000 {
-                                    let above_upper = af > bf;
-                                    let below_lower = af < -bf || af.is_nan() || bf.is_nan();
+                                    let unordered = af.is_nan() || bf.is_nan();
+                                    let above_upper = af > bf || unordered;
+                                    let below_lower = af < -bf || unordered;
                                     let mask = (if above_upper { 0x8000_0000 } else { 0 })
                                         | (if below_lower { 0x4000_0000 } else { 0 });
-                                    (mask, mask == 0)
+                                    (mask, mask != 0)
                                 } else {
                                     let condition = match compare_operation {
                                         0b000000 => af == bf,
@@ -8583,6 +8586,50 @@ mod tests {
             [0, 0, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3]
         );
     }
+    #[test]
+    fn altivec_vcmpbfp_sets_both_nan_bits_and_summarizes_bounds() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 4);
+        let instruction =
+            (4 << 26) | (1 << 21) | (2 << 16) | (3 << 11) | 966 | (1 << 10);
+        put_instruction(&mut memory, 0x1000, instruction);
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        let a = [0.0_f32, 2.0, -2.0, f32::NAN];
+        let b = [1.0_f32; 4];
+        for lane in 0..4 {
+            cpu.state.vr[2][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&a[lane].to_bits().to_be_bytes());
+            cpu.state.vr[3][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&b[lane].to_bits().to_be_bytes());
+        }
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[1],
+            [
+                0, 0, 0, 0, 0x80, 0, 0, 0, 0x40, 0, 0, 0, 0xC0, 0, 0, 0
+            ]
+        );
+        assert_eq!(cpu.state.cr[6], 0b0100);
+
+        cpu.state.pc = 0x1000;
+        for lane in 0..4 {
+            cpu.state.vr[2][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&0.0_f32.to_bits().to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[6], 0b0010);
+
+        cpu.state.pc = 0x1000;
+        for lane in 0..4 {
+            cpu.state.vr[2][lane * 4..lane * 4 + 4]
+                .copy_from_slice(&2.0_f32.to_bits().to_be_bytes());
+        }
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.cr[6], 0b1000);
+    }
+
     #[test]
     fn classic_altivec_integer_float_conversions_apply_scale_and_saturation() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 12);
