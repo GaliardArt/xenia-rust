@@ -2469,12 +2469,18 @@ impl PpcInterpreter {
                         }
                         43 => {
                             for lane in 0..16 {
-                                let selector = (control[lane] & 0x1F) as usize;
-                                result[lane] = if selector < 16 {
-                                    a[selector]
+                                // AltiVec vperm uses control bit 7 to zero the
+                                // output byte; bits 0..4 select the 32-byte input.
+                                if control[lane] & 0x80 != 0 {
+                                    result[lane] = 0;
                                 } else {
-                                    b[selector - 16]
-                                };
+                                    let selector = (control[lane] & 0x1F) as usize;
+                                    result[lane] = if selector < 16 {
+                                        a[selector]
+                                    } else {
+                                        b[selector - 16]
+                                    };
+                                }
                             }
                         }
                         44 => {
@@ -3397,12 +3403,19 @@ impl PpcInterpreter {
                     let left = self.state.vr[va];
                     let right = self.state.vr[vb];
                     for lane in 0..16 {
-                        let selector = (control[lane] & 0x1F) as usize;
-                        result[lane] = if selector < 16 {
-                            left[selector]
+                        // Match the architectural AltiVec byte-permute rule:
+                        // a set high bit produces zero, otherwise low 5 bits index
+                        // the concatenated VA||VB byte stream.
+                        if control[lane] & 0x80 != 0 {
+                            result[lane] = 0;
                         } else {
-                            right[selector - 16]
-                        };
+                            let selector = (control[lane] & 0x1F) as usize;
+                            result[lane] = if selector < 16 {
+                                left[selector]
+                            } else {
+                                right[selector - 16]
+                            };
+                        }
                     }
                     self.state.vr[vd] = result;
                     self.state.pc = next_pc;
@@ -7016,12 +7029,12 @@ mod tests {
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x72] = std::array::from_fn(|i| i as u8);
         cpu.state.vr[0x43] = std::array::from_fn(|i| (0x80 + i) as u8);
-        cpu.state.vr[5] = [0, 15, 16, 31, 1, 14, 17, 30, 2, 13, 18, 29, 3, 12, 19, 28];
+        cpu.state.vr[5] = [0x80, 0x8F, 16, 31, 1, 14, 17, 30, 2, 13, 18, 29, 3, 12, 19, 28];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
             [
-                0, 15, 0x80, 0x8F, 1, 14, 0x81, 0x8E, 2, 13, 0x82, 0x8D, 3, 12, 0x83, 0x8C
+                0, 0, 0x80, 0x8F, 1, 14, 0x81, 0x8E, 2, 13, 0x82, 0x8D, 3, 12, 0x83, 0x8C
             ]
         );
     }
@@ -8546,7 +8559,7 @@ mod tests {
         cpu.state.vr[3] = [
             255, 0, 254, 1, 253, 2, 252, 3, 251, 4, 250, 5, 249, 6, 248, 7,
         ];
-        cpu.state.vr[5] = [0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23];
+        cpu.state.vr[5] = [0x80, 0x90, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23];
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
@@ -8570,7 +8583,7 @@ mod tests {
         assert_eq!(
             cpu.state.vr[1],
             [
-                0, 255, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3
+                0, 0, 255, 0, 1, 254, 254, 1, 2, 253, 253, 2, 3, 252, 252, 3
             ]
         );
     }
