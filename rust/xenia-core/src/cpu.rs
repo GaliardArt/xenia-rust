@@ -2300,9 +2300,8 @@ impl PpcInterpreter {
                 let unary_operation = (instruction >> 4) & 0x7F;
                 let immediate = (instruction >> 16) & 0x1F;
                 let unary_handled = match unary_operation {
-                    0b0100011 | 0b0100111 | 0b0101011 | 0b0101111
-                    | 0b0110011 | 0b0110111 | 0b0111011 | 0b0111111
-                    | 0b1100011 | 0b1100111 | 0b1101011 | 0b1101111
+                    0b0100011 | 0b0100111 | 0b0101011 | 0b0101111 | 0b0110011 | 0b0110111
+                    | 0b0111011 | 0b0111111 | 0b1100011 | 0b1100111 | 0b1101011 | 0b1101111
                     | 0b1110011 | 0b1110111 => {
                         for lane in 0..4 {
                             let offset = lane * 4;
@@ -2316,21 +2315,30 @@ impl PpcInterpreter {
                                     let saturated = !scaled.is_finite()
                                         || scaled < i32::MIN as f32
                                         || scaled >= 2_147_483_648.0;
-                                    if saturated { self.state.vscr |= 1 << 31; }
+                                    if saturated {
+                                        self.state.vscr |= 1 << 31;
+                                    }
                                     integer as u32
                                 }
                                 0b0100111 => {
                                     let scaled = float * 2.0_f32.powi(immediate as i32);
                                     let clamped = scaled.clamp(0.0, u32::MAX as f32);
-                                    let integer = if scaled.is_nan() || scaled < 0.0 { 0 } else { clamped as u32 };
-                                    if !scaled.is_finite() || scaled < 0.0 || scaled >= 4_294_967_296.0 {
+                                    let integer = if scaled.is_nan() || scaled < 0.0 {
+                                        0
+                                    } else {
+                                        clamped as u32
+                                    };
+                                    if !scaled.is_finite()
+                                        || scaled < 0.0
+                                        || scaled >= 4_294_967_296.0
+                                    {
                                         self.state.vscr |= 1 << 31;
                                     }
                                     integer
                                 }
-                                0b0101011 => {
-                                    (((raw as i32) as f32) / 2.0_f32.powi(immediate as i32)).to_bits()
-                                }
+                                0b0101011 => (((raw as i32) as f32)
+                                    / 2.0_f32.powi(immediate as i32))
+                                .to_bits(),
                                 0b0101111 => {
                                     ((raw as f32) / 2.0_f32.powi(immediate as i32)).to_bits()
                                 }
@@ -2344,7 +2352,9 @@ impl PpcInterpreter {
                                 0b1101111 => float.log2().to_bits(),
                                 0b1110011 => {
                                     let selected = ((immediate & 3) as usize) * 4;
-                                    u32::from_be_bytes(b[selected..selected + 4].try_into().unwrap())
+                                    u32::from_be_bytes(
+                                        b[selected..selected + 4].try_into().unwrap(),
+                                    )
                                 }
                                 0b1110111 => {
                                     let signed = if immediate & 0x10 != 0 {
@@ -2369,7 +2379,8 @@ impl PpcInterpreter {
                 }
 
                 // VX128_4 immediate word rotate/insert.
-                let special_selector = (((instruction >> 6) & 0x7) << 2) | ((instruction >> 4) & 0x3);
+                let special_selector =
+                    (((instruction >> 6) & 0x7) << 2) | ((instruction >> 4) & 0x3);
                 if special_selector == 0b1110001 {
                     let rotate = ((instruction >> 6) & 0x3) as usize;
                     let mask = (instruction >> 11) & 0x1F;
@@ -2380,7 +2391,11 @@ impl PpcInterpreter {
                         let use_source = mask & (1 << (4 - lane)) != 0;
                         let start = lane * 4;
                         let source_start = source_lane * 4;
-                        let selected = if use_source { &source[source_start..source_start + 4] } else { &old[start..start + 4] };
+                        let selected = if use_source {
+                            &source[source_start..source_start + 4]
+                        } else {
+                            &old[start..start + 4]
+                        };
                         result[start..start + 4].copy_from_slice(selected);
                     }
                     self.state.vr[registers.vd] = result;
@@ -7008,27 +7023,25 @@ mod tests {
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x43] = [
-            0x00, 0x00, 0x00, 0x02,
-            0xFF, 0xFF, 0xFF, 0xFE,
-            0x00, 0x00, 0x00, 0x03,
-            0x00, 0x00, 0x00, 0x04,
+            0x00, 0x00, 0x00, 0x02, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+            0x00, 0x04,
         ];
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
             [
-                0x3F, 0x80, 0x00, 0x00,
-                0xBF, 0x80, 0x00, 0x00,
-                0x3F, 0xC0, 0x00, 0x00,
-                0x40, 0x00, 0x00, 0x00,
+                0x3F, 0x80, 0x00, 0x00, 0xBF, 0x80, 0x00, 0x00, 0x3F, 0xC0, 0x00, 0x00, 0x40, 0x00,
+                0x00, 0x00,
             ]
         );
 
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x7D],
-            [0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03,
-             0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03]
+            [
+                0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+                0x00, 0x03
+            ]
         );
 
         cpu.state.vr[0x43] = [
