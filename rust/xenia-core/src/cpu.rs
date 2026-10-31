@@ -4767,9 +4767,9 @@ impl PpcInterpreter {
 #[cfg(test)]
 mod tests {
     use super::{
-        f16_bits_to_f32, f32_to_f16_bits, PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1,
-        PPC_MSR_FP, PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION,
-        PPC_SRR1_IMPRECISE, PpcError, PpcException, PpcFpExceptionMode, PpcInterpreter,
+        PPC_FP_UNAVAILABLE_VECTOR, PPC_MSR_FE0, PPC_MSR_FE1, PPC_MSR_FP,
+        PPC_PROGRAM_EXCEPTION_VECTOR, PPC_SRR1_FP_ENABLED_EXCEPTION, PPC_SRR1_IMPRECISE, PpcError,
+        PpcException, PpcFpExceptionMode, PpcInterpreter, f16_bits_to_f32, f32_to_f16_bits,
     };
 
     fn fp_enabled_cpu() -> PpcInterpreter {
