@@ -2269,13 +2269,11 @@ impl PpcInterpreter {
                         }
                         1091 | 1603 => {
                             vector = [0; 16];
-                            if offset != 0 {
-                                let start = 16 - offset;
-                                for lane in 0..offset {
-                                    vector[start + lane] = memory
-                                        .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
-                                        .map_err(Into::into)?;
-                                }
+                            let start = 15 - offset;
+                            for lane in 0..=offset {
+                                vector[start + lane] = memory
+                                    .read_u8(GuestAddress(aligned.wrapping_add(lane as u32)))
+                                    .map_err(Into::into)?;
                             }
                             self.state.vr[vd] = vector;
                         }
@@ -2305,7 +2303,7 @@ impl PpcInterpreter {
                         }
                         1347 | 1859 => {
                             memory
-                                .write_bytes(GuestAddress(aligned), &vector[16 - offset..])
+                                .write_bytes(GuestAddress(aligned), &vector[15 - offset..])
                                 .map_err(Into::into)?;
                         }
                         _ => unreachable!(),
@@ -8905,10 +8903,10 @@ mod tests {
             (963, 0x2020),  // stvxl128
             (1283, 0x2021), // stvlx128
             (1795, 0x2021), // stvlxl128
-            (1347, 0x2020), // stvrx128
-            (1859, 0x2020), // stvrxl128
+            (1347, 0x2022), // stvrx128
+            (1859, 0x2022), // stvrxl128
         ] {
-            let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x24);
+            let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x22);
             put_instruction(
                 &mut memory,
                 0x2000,
@@ -8922,8 +8920,8 @@ mod tests {
 
             assert!(cpu.step(&mut memory).is_err(), "selector {selector}");
             assert_eq!(
-                memory.read_bytes(GuestAddress(0x2020), 4),
-                Ok(&[0; 4][..]),
+                memory.read_bytes(GuestAddress(0x2020), 2),
+                Ok(&[0; 2][..]),
                 "selector {selector} partially changed guest RAM"
             );
             assert_eq!(cpu.state.pc, 0x2000);
