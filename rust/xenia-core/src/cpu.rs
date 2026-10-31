@@ -2181,8 +2181,8 @@ impl PpcInterpreter {
                         | 1795
                         | 1859
                 ) {
-                    let vd = (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5))
-                        as usize;
+                    let vd =
+                        (((instruction >> 21) & 0x1F) | (((instruction >> 2) & 0x3) << 5)) as usize;
                     let ra = ((instruction >> 16) & 0x1F) as usize;
                     let rb = ((instruction >> 11) & 0x1F) as usize;
                     let base = if ra == 0 {
@@ -3291,7 +3291,8 @@ impl PpcInterpreter {
                                 for (lane, pair) in [(1usize, 0usize), (3, 2)] {
                                     let first = u32::from_be_bytes(
                                         a[pair * 4..pair * 4 + 4].try_into().unwrap(),
-                                    ) as i32 as i64;
+                                    ) as i32
+                                        as i64;
                                     let second = u32::from_be_bytes(
                                         a[(pair + 1) * 4..(pair + 1) * 4 + 4].try_into().unwrap(),
                                     ) as i32 as i64;
@@ -3300,7 +3301,8 @@ impl PpcInterpreter {
                                     ) as i32 as i64;
                                     let exact = first + second + accumulator;
                                     saturated |= exact < i32::MIN as i64 || exact > i32::MAX as i64;
-                                    words[lane] = exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
+                                    words[lane] =
+                                        exact.clamp(i32::MIN as i64, i32::MAX as i64) as u32;
                                 }
                             }
                             1928 => {
@@ -8741,12 +8743,15 @@ mod tests {
         assert_eq!(f16_bits_to_f32(0xC000), -2.0);
         assert_eq!(f16_bits_to_f32(0x0001), 2.0_f32.powi(-24));
         assert!(f16_bits_to_f32(0x7E00).is_nan());
-    } 
+    }
+
     #[test]
     fn vmx128_indexed_memory_load_store_and_alignment_masks_use_extended_registers() {
         let mut memory = GuestMemory::new(GuestAddress(0x2000), 0x100);
         for index in 0..16 {
-            memory.write_u8(GuestAddress(0x2040 + index), index as u8).unwrap();
+            memory
+                .write_u8(GuestAddress(0x2040 + index), index as u8)
+                .unwrap();
         }
         let encode_memory = |selector: u32, vd: u32, ra: u32, rb: u32| {
             (4 << 26)
