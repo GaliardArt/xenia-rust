@@ -3220,7 +3220,7 @@ impl PpcInterpreter {
                                 all_false &= !is_true;
                             }
                         }
-                        if instruction & 1 != 0 {
+                        if instruction & (1 << 10) != 0 {
                             self.state.cr[6] = if all_true {
                                 0b1000
                             } else if all_false {
