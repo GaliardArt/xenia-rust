@@ -3734,53 +3734,79 @@ impl PpcInterpreter {
                     let pack_type = immediate >> 2;
                     let unpacked = match pack_type {
                         0 => {
-                            let channels = [b[1], b[2], b[3], b[0]];
-                            channels.map(|channel| channel as f32 / 255.0)
+                            let channels = [b[13], b[14], b[15], b[12]];
+                            channels.map(|channel| f32::from_bits(0x3F80_0000 | channel as u32))
                         }
                         1 => {
-                            let x = i16::from_be_bytes([b[0], b[1]]) as f32 / 32767.0;
-                            let y = i16::from_be_bytes([b[2], b[3]]) as f32 / 32767.0;
-                            [x.max(-1.0), y.max(-1.0), 0.0, 1.0]
+                            let x = i16::from_be_bytes([b[12], b[13]]) as i32;
+                            let y = i16::from_be_bytes([b[14], b[15]]) as i32;
+                            [
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(x as u32)),
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(y as u32)),
+                                0.0,
+                                1.0,
+                            ]
                         }
                         2 => {
-                            let packed = u32::from_be_bytes(b[..4].try_into().unwrap());
+                            let packed = u32::from_be_bytes(b[12..16].try_into().unwrap());
+                            let sign_extend = |value: u32| ((value << 22) as i32 >> 22) as u32;
                             [
-                                (packed & 0x3FF) as f32 / 1023.0,
-                                ((packed >> 10) & 0x3FF) as f32 / 1023.0,
-                                ((packed >> 20) & 0x3FF) as f32 / 1023.0,
-                                ((packed >> 30) & 0x3) as f32 / 3.0,
+                                f32::from_bits(
+                                    0x4040_0000_u32.wrapping_add(sign_extend(packed & 0x3FF)),
+                                ),
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
+                                    (packed >> 10) & 0x3FF,
+                                ))),
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
+                                    (packed >> 20) & 0x3FF,
+                                ))),
+                                f32::from_bits(
+                                    0x3F80_0000_u32.wrapping_add((packed >> 30) & 0x3),
+                                ),
                             ]
                         }
                         3 => {
-                            let x = u16::from_be_bytes([b[0], b[1]]);
-                            let y = u16::from_be_bytes([b[2], b[3]]);
+                            let x = u16::from_be_bytes([b[12], b[13]]);
+                            let y = u16::from_be_bytes([b[14], b[15]]);
                             [f16_bits_to_f32(x), f16_bits_to_f32(y), 0.0, 1.0]
                         }
                         4 => {
                             let mut lanes = [0.0; 4];
                             for (lane, value) in lanes.iter_mut().enumerate() {
-                                let offset = lane * 2;
-                                let raw = i16::from_be_bytes([b[offset], b[offset + 1]]) as f32;
-                                *value = (raw / 32767.0).max(-1.0);
+                                let offset = 8 + lane * 2;
+                                let raw =
+                                    i16::from_be_bytes([b[offset], b[offset + 1]]) as i32;
+                                *value = f32::from_bits(
+                                    0x4040_0000_u32.wrapping_add(raw as u32),
+                                );
                             }
                             lanes
                         }
                         5 => {
                             let mut lanes = [0.0; 4];
                             for (lane, value) in lanes.iter_mut().enumerate() {
-                                let offset = lane * 2;
+                                let offset = 8 + lane * 2;
                                 let half = u16::from_be_bytes([b[offset], b[offset + 1]]);
                                 *value = f16_bits_to_f32(half);
                             }
                             lanes
                         }
                         6 => {
-                            let packed = u64::from_be_bytes(b[..8].try_into().unwrap());
+                            let packed = u64::from_be_bytes(b[8..16].try_into().unwrap());
+                            let sign_extend = |value: u64| ((value << 12) as i64 >> 12) as u32;
                             [
-                                (packed & 0xF_FFFF) as f32 / 1_048_575.0,
-                                ((packed >> 20) & 0xF_FFFF) as f32 / 1_048_575.0,
-                                ((packed >> 40) & 0xF_FFFF) as f32 / 1_048_575.0,
-                                ((packed >> 60) & 0xF) as f32 / 15.0,
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
+                                    (packed & 0xF_FFFF) as u32,
+                                ))),
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
+                                    ((packed >> 20) & 0xF_FFFF) as u32,
+                                ))),
+                                f32::from_bits(0x4040_0000_u32.wrapping_add(sign_extend(
+                                    ((packed >> 40) & 0xF_FFFF) as u32,
+                                ))),
+                                f32::from_bits(
+                                    0x3F80_0000_u32.wrapping_add((packed >> 60) as u32 & 0xF),
+                                ),
                             ]
                         }
                         _ => return Err(PpcError::UnsupportedInstruction { pc, opcode }),
