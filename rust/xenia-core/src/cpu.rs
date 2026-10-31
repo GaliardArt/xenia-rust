@@ -2106,7 +2106,7 @@ impl PpcInterpreter {
                 }
 
                 match operation {
-                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 | 0b011001 | 0b011101 => {
+                    0b000001 | 0b000101 | 0b001001 | 0b001101 | 0b010001 | 0b010101 => {
                         // Four IEEE-754 binary32 lanes. Fused multiply-add variants
                         // use the destination as the third source, as specified by VX128.
                         let destination = self.state.vr[registers.vd];
@@ -2127,31 +2127,28 @@ impl PpcInterpreter {
                                 0b001001 => av * bv,
                                 0b001101 | 0b010001 => av.mul_add(dv, bv),
                                 0b010101 => bv - av * dv,
-                                0b011001 => {
-                                    let cv = f32::from_bits(u32::from_be_bytes(
-                                        destination[offset..offset + 4].try_into().unwrap(),
-                                    ));
-                                    av.mul_add(bv, cv)
-                                }
-                                0b011101 => {
-                                    let sum = (0..4)
-                                        .map(|index| {
-                                            let lane_offset = index * 4;
-                                            let left = f32::from_bits(u32::from_be_bytes(
-                                                a[lane_offset..lane_offset + 4].try_into().unwrap(),
-                                            ));
-                                            let right = f32::from_bits(u32::from_be_bytes(
-                                                b[lane_offset..lane_offset + 4].try_into().unwrap(),
-                                            ));
-                                            left * right
-                                        })
-                                        .sum::<f32>();
-                                    sum
-                                }
                                 _ => unreachable!(),
                             };
                             result[offset..offset + 4]
                                 .copy_from_slice(&value.to_bits().to_be_bytes());
+                        }
+                    }
+                    0b011001 | 0b011101 => {
+                        let lane_count = if operation == 0b011001 { 3 } else { 4 };
+                        let mut sum = 0.0_f32;
+                        for lane in 0..lane_count {
+                            let offset = lane * 4;
+                            let av = f32::from_bits(u32::from_be_bytes(
+                                a[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            let bv = f32::from_bits(u32::from_be_bytes(
+                                b[offset..offset + 4].try_into().unwrap(),
+                            ));
+                            sum = av.mul_add(bv, sum);
+                        }
+                        for lane in 0..4 {
+                            let offset = lane * 4;
+                            result[offset..offset + 4].copy_from_slice(&sum.to_bits().to_be_bytes());
                         }
                     }
                     0b100001 | 0b100101 | 0b101001 | 0b101101 | 0b110001 => {
