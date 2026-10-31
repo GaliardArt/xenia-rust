@@ -2197,14 +2197,14 @@ impl PpcInterpreter {
 
                     match memory_selector {
                         3 => {
-                            for lane in 0..16 {
-                                vector[lane] = offset.wrapping_add(lane) as u8;
+                            for (lane, byte) in vector.iter_mut().enumerate() {
+                                *byte = offset.wrapping_add(lane) as u8;
                             }
                             self.state.vr[vd] = vector;
                         }
                         67 => {
-                            for lane in 0..16 {
-                                vector[lane] = (16usize - offset + lane) as u8;
+                            for (lane, byte) in vector.iter_mut().enumerate() {
+                                *byte = (16usize - offset + lane) as u8;
                             }
                             self.state.vr[vd] = vector;
                         }
