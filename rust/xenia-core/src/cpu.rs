@@ -9322,8 +9322,8 @@ mod tests {
     }
 
     #[test]
-    fn vmx128_d3d_pack_modes_place_packed_words_by_selector() {
-        let mut memory = GuestMemory::new(GuestAddress(0x1000), 28);
+    fn vmx128_d3d_pack_modes_follow_xenia_word_permute_masks() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 64);
         let encode_pack = |immediate: u32, shift: u32| {
             let vd = 0x46_u32;
             let vb = 0x25_u32;
@@ -9337,17 +9337,24 @@ mod tests {
                 | (((vd >> 5) & 3) << 2)
                 | ((vb >> 5) & 3)
         };
-        let cases = [
-            (20, 0, 0, 0, 0),
-            (21, 3, 0, 4, 4),
-            (22, 0, 8, 0, 8),
-            (22, 1, 4, 0, 8),
-            (22, 2, 0, 0, 8),
-            (22, 3, 0, 4, 4),
-            (23, 3, 12, 0, 4),
+        // Each lane source is an old destination word (0..3), packed word 2
+        // (4), or packed word 3 (5), matching Xenia's MakePermuteMask tables.
+        let cases: [(u32, u32, [usize; 4]); 13] = [
+            (20, 0, [0, 1, 2, 3]),
+            (21, 0, [0, 1, 2, 5]),
+            (21, 1, [0, 1, 5, 3]),
+            (21, 2, [0, 5, 2, 3]),
+            (21, 3, [5, 1, 2, 3]),
+            (22, 0, [0, 1, 4, 5]),
+            (22, 1, [0, 4, 5, 3]),
+            (22, 2, [4, 5, 2, 3]),
+            (22, 3, [5, 1, 2, 3]),
+            (23, 0, [0, 1, 4, 5]),
+            (23, 1, [0, 4, 5, 3]),
+            (23, 2, [4, 5, 2, 3]),
+            (23, 3, [0, 1, 2, 4]),
         ];
-        let packed = [0x3C, 0, 0xC0, 0, 0x38, 0, 0x44, 0];
-        for (index, (immediate, shift, _, _, _)) in cases.iter().enumerate() {
+        for (index, (immediate, shift, _)) in cases.iter().enumerate() {
             put_instruction(
                 &mut memory,
                 0x1000 + index as u32 * 4,
@@ -9355,17 +9362,39 @@ mod tests {
             );
         }
 
+        let old = [
+            [0xA0, 0xA1, 0xA2, 0xA3],
+            [0xB0, 0xB1, 0xB2, 0xB3],
+            [0xC0, 0xC1, 0xC2, 0xC3],
+            [0xD0, 0xD1, 0xD2, 0xD3],
+        ];
+        let packed_words = [
+            [0x3C, 0x00, 0xC0, 0x00],
+            [0x38, 0x00, 0x44, 0x00],
+        ];
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x25] = [
             0x3F, 0x80, 0, 0, 0xC0, 0, 0, 0, 0x3F, 0, 0, 0, 0x40, 0x80, 0, 0,
         ];
-        for (immediate, shift, destination_offset, source_offset, count) in cases {
-            let mut expected = [0xAA; 16];
-            expected[destination_offset..destination_offset + count]
-                .copy_from_slice(&packed[source_offset..source_offset + count]);
-            cpu.state.vr[0x46] = [0xAA; 16];
+
+        for (immediate, shift, selectors) in cases {
+            cpu.state.vr[0x46] = [
+                old[0][0], old[0][1], old[0][2], old[0][3],
+                old[1][0], old[1][1], old[1][2], old[1][3],
+                old[2][0], old[2][1], old[2][2], old[2][3],
+                old[3][0], old[3][1], old[3][2], old[3][3],
+            ];
             cpu.step(&mut memory).unwrap();
+            let mut expected = [0; 16];
+            for (lane, selector) in selectors.into_iter().enumerate() {
+                let word = match selector {
+                    0..=3 => old[selector],
+                    4..=5 => packed_words[selector - 4],
+                    _ => unreachable!(),
+                };
+                expected[lane * 4..lane * 4 + 4].copy_from_slice(&word);
+            }
             assert_eq!(
                 cpu.state.vr[0x46], expected,
                 "pack immediate {immediate}, shift {shift}"
