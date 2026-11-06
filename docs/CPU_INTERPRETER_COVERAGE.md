@@ -102,6 +102,12 @@ The audit verified these decoder families:
    future mapped/MMIO backends must override them where all-range behavior is
    required.
 
+9. **Vector floating-point golden coverage:** added upstream Xenia fixtures for
+   classic and VMX128 add/subtract plus VMX128 three- and four-lane multiply sums.
+   VSCR.NJ regressions now cover classic add/reciprocal and VMX128 fused
+   multiply-add/float comparison. These are reference-fixture checks, not hardware
+   differential proof.
+
 ### Remaining semantic risks (not dispatch gaps)
 
 1. **VSCR.NJ and SAT:** the non-Java denormal flush helper is integrated into the
