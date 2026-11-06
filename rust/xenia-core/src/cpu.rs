@@ -9368,10 +9368,7 @@ mod tests {
             [0xC0, 0xC1, 0xC2, 0xC3],
             [0xD0, 0xD1, 0xD2, 0xD3],
         ];
-        let packed_words = [
-            [0x3C, 0x00, 0xC0, 0x00],
-            [0x38, 0x00, 0x44, 0x00],
-        ];
+        let packed_words = [[0x3C, 0x00, 0xC0, 0x00], [0x38, 0x00, 0x44, 0x00]];
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
         cpu.state.vr[0x25] = [
@@ -9380,10 +9377,9 @@ mod tests {
 
         for (immediate, shift, selectors) in cases {
             cpu.state.vr[0x46] = [
-                old[0][0], old[0][1], old[0][2], old[0][3],
-                old[1][0], old[1][1], old[1][2], old[1][3],
-                old[2][0], old[2][1], old[2][2], old[2][3],
-                old[3][0], old[3][1], old[3][2], old[3][3],
+                old[0][0], old[0][1], old[0][2], old[0][3], old[1][0], old[1][1], old[1][2],
+                old[1][3], old[2][0], old[2][1], old[2][2], old[2][3], old[3][0], old[3][1],
+                old[3][2], old[3][3],
             ];
             cpu.step(&mut memory).unwrap();
             let mut expected = [0; 16];
