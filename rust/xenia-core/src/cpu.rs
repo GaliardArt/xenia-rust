@@ -9120,6 +9120,8 @@ mod tests {
                 0xA7, 0xF0
             ]
         );
+        cpu.state.vr[0x72][12..16].copy_from_slice(&0x3FF3_3333_u32.to_be_bytes());
+        cpu.state.vr[0x43][12..16].copy_from_slice(&0x40B0_51EB_u32.to_be_bytes());
         cpu.step(&mut memory).unwrap();
         assert_eq!(
             cpu.state.vr[0x45],
