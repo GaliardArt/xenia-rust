@@ -9024,8 +9024,8 @@ mod tests {
         let vd = 0x7D_u32;
         let va = 0x72_u32;
         let vb = 0x43_u32;
-        let encode = |operation: u32| {
-            (6 << 26)
+        let encode = |primary: u32, operation: u32| {
+            (primary << 26)
                 | ((vd & 0x1F) << 21)
                 | ((va & 0x1F) << 16)
                 | ((vb & 0x1F) << 11)
@@ -9036,8 +9036,8 @@ mod tests {
                 | (((operation >> 2) & 0xF) << 6)
                 | ((operation & 1) << 4)
         };
-        put_instruction(&mut memory, 0x1000, encode(0b001101)); // vmaddfp128
-        put_instruction(&mut memory, 0x1004, encode(0b000000)); // vcmpeqfp128
+        put_instruction(&mut memory, 0x1000, encode(5, 0b001101)); // vmaddfp128
+        put_instruction(&mut memory, 0x1004, encode(6, 0b000000)); // vcmpeqfp128
 
         let mut cpu = fp_enabled_cpu();
         cpu.state.pc = 0x1000;
