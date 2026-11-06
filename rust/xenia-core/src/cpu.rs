@@ -9038,8 +9038,16 @@ mod tests {
         };
         put_instruction(&mut memory, 0x1000, encode_classic(1, 2, 3, 10)); // vaddfp
         put_instruction(&mut memory, 0x1004, encode_classic(4, 2, 3, 74)); // vsubfp
-        put_instruction(&mut memory, 0x1008, encode_vmx128(0x7D, 0x72, 0x43, 0b000001));
-        put_instruction(&mut memory, 0x100C, encode_vmx128(0x7C, 0x72, 0x43, 0b000101));
+        put_instruction(
+            &mut memory,
+            0x1008,
+            encode_vmx128(0x7D, 0x72, 0x43, 0b000001),
+        );
+        put_instruction(
+            &mut memory,
+            0x100C,
+            encode_vmx128(0x7C, 0x72, 0x43, 0b000101),
+        );
 
         let a = [
             0x41, 0x20, 0, 0, 0xC1, 0x20, 0, 0, 0x41, 0x70, 0, 0, 0xC1, 0x70, 0, 0,
@@ -9072,6 +9080,48 @@ mod tests {
         assert_eq!(cpu.state.vr[3], b);
         assert_eq!(cpu.state.vr[0x72], a);
         assert_eq!(cpu.state.vr[0x43], b);
+    }
+
+    #[test]
+    fn vmx128_three_and_four_lane_float_sums_match_xenia_golden_vectors() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let encode = |operation: u32| {
+            let vd = 0x45_u32;
+            let va = 0x72_u32;
+            let vb = 0x43_u32;
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 1) << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode(0b011001)); // vmsum3fp128
+        put_instruction(&mut memory, 0x1004, encode(0b011101)); // vmsum4fp128
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[0x72] = [
+            0x3F, 0x80, 0, 0, 0x3F, 0xC0, 0, 0, 0x3F, 0x8C, 0xCC, 0xCD, 0x01, 0x02, 0x03, 0x04,
+        ];
+        cpu.state.vr[0x43] = [
+            0x40, 0, 0, 0, 0x40, 0x70, 0, 0, 0x40, 0x13, 0xD7, 0x0A, 0x01, 0x02, 0x03, 0x04,
+        ];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x45],
+            [0x41, 0x22, 0xA7, 0xF0, 0x41, 0x22, 0xA7, 0xF0, 0x41, 0x22, 0xA7, 0xF0, 0x41, 0x22, 0xA7, 0xF0]
+        );
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[0x45],
+            [0x41, 0xA5, 0x14, 0x7B, 0x41, 0xA5, 0x14, 0x7B, 0x41, 0xA5, 0x14, 0x7B, 0x41, 0xA5, 0x14, 0x7B]
+        );
     }
 
     #[test]
