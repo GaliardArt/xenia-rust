@@ -9322,6 +9322,84 @@ mod tests {
     }
 
     #[test]
+    fn vmx128_d3d_pack_matches_upstream_reference_vectors() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
+        let encode_pack = |pack_type: u32, pack_mode: u32| {
+            let vd = 0x46_u32;
+            let vb = 0x25_u32;
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | (((pack_type << 2) | pack_mode) << 16)
+                | ((vb & 0x1F) << 11)
+                | (6 << 8)
+                | (1 << 4)
+                | (((vd >> 5) & 3) << 2)
+                | ((vb >> 5) & 3)
+        };
+        let cases: [([u32; 4], u32, u32, [u32; 4]); 6] = [
+            (
+                [0x4040_0001, 0x4040_0002, 0x4040_0003, 0x4040_0004],
+                0,
+                1,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0xCDCD_CDCD, 0x0401_0203],
+            ),
+            (
+                [0x4040_7FFF, 0x403F_8001, 0, 0],
+                1,
+                1,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0xCDCD_CDCD, 0x7FFF_8001],
+            ),
+            (
+                [0x3F00_0000, 0xBF00_0000, 0x3F80_0000, 0],
+                2,
+                1,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0xCDCD_CDCD, 0x2018_0601],
+            ),
+            (
+                [0x3F00_0000, 0xBF00_0000, 0, 0],
+                3,
+                1,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0xCDCD_CDCD, 0x3800_B800],
+            ),
+            (
+                [0x403F_8001, 0x403F_FFF8, 0x4040_007F, 0x4040_0000],
+                4,
+                2,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0x8001_FFF8, 0x007F_0000],
+            ),
+            (
+                [0x3F00_0000, 0xBF00_0000, 0x3F80_0000, 0xBF80_0000],
+                5,
+                2,
+                [0xCDCD_CDCD, 0xCDCD_CDCD, 0x3800_B800, 0x3C00_BC00],
+            ),
+        ];
+        for (index, (_, pack_type, pack_mode, _)) in cases.iter().enumerate() {
+            put_instruction(
+                &mut memory,
+                0x1000 + index as u32 * 4,
+                encode_pack(*pack_type, *pack_mode),
+            );
+        }
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        for (source, pack_type, pack_mode, expected) in cases {
+            cpu.state.vr[0x25] = source.map(u32::to_be_bytes).concat().try_into().unwrap();
+            cpu.state.vr[0x46] = [0xCD; 16];
+            cpu.step(&mut memory).unwrap();
+            let actual: [u32; 4] = core::array::from_fn(|lane| {
+                let offset = lane * 4;
+                u32::from_be_bytes(cpu.state.vr[0x46][offset..offset + 4].try_into().unwrap())
+            });
+            assert_eq!(
+                actual, expected,
+                "D3D pack type {pack_type}, mode {pack_mode}"
+            );
+        }
+    }
+
+    #[test]
     fn vmx128_d3d_unpack_matches_upstream_reference_vectors() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 24);
         let encode_unpack = |pack_type: u32| {
