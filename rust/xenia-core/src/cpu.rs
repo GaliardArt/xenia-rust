@@ -9019,6 +9019,57 @@ mod tests {
         );
     }
     #[test]
+    fn vscr_non_java_mode_flushes_vmx128_fma_and_float_compare_inputs() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
+        let vd = 0x7D_u32;
+        let va = 0x72_u32;
+        let vb = 0x43_u32;
+        let encode = |operation: u32| {
+            (6 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 1) << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode(0b001101)); // vmaddfp128
+        put_instruction(&mut memory, 0x1004, encode(0b000000)); // vcmpeqfp128
+
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[vd as usize] = [
+            0x3F, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        cpu.state.vr[va as usize] = [
+            0, 0, 0, 1, 0x80, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        cpu.state.vr[vb as usize] = [0; 16];
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[vd as usize][..4], &[0, 0, 0, 1]);
+        cpu.state.vscr = 1 << 15;
+        cpu.state.pc = 0x1000;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(&cpu.state.vr[vd as usize][..8], &[0; 8]);
+
+        cpu.state.vscr = 0;
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(
+            cpu.state.vr[vd as usize],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        cpu.state.vscr = 1 << 15;
+        cpu.state.pc = 0x1004;
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[vd as usize], [0xFF; 16]);
+    }
+
+    #[test]
     fn altivec_fp_minmax_preserves_nan_precedence_and_signed_zero() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         let encode_vx = |vd: u32, va: u32, vb: u32, xo: u32| {
