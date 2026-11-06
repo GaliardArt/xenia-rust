@@ -104,10 +104,14 @@ The audit verified these decoder families:
 
 ### Remaining semantic risks (not dispatch gaps)
 
-1. **VSCR.NJ:** vector non-Java/flush-to-zero behavior is not yet applied
-   consistently to vector floating-point inputs and results. SAT sticky updates
-   exist in selected saturating arithmetic, pack, and conversion paths, but the
-   complete VSCR state/side-effect model still needs differential vectors.
+1. **VSCR.NJ and SAT:** the non-Java denormal flush helper is integrated into the
+   main classic and VMX128 floating-point arithmetic, estimate, rounding,
+   conversion, and comparison paths, with regression coverage for vector add and
+   reciprocal. The remaining gap is systematic per-family edge testing (including
+   NaNs, signed zero, subnormal outputs, and all estimate/conversion variants).
+   SAT sticky updates exist in selected saturating arithmetic, pack, and conversion
+   paths, but the complete VSCR state/side-effect model still needs independent
+   differential vectors.
 2. **Hardware estimates:** `vrefp`, `vrsqrtefp`, `vexptefp`, and `vlogefp` paths use
    host floating-point math. They do not reproduce Xenon estimate tables,
    approximation error, or every special-value result bit-for-bit.
