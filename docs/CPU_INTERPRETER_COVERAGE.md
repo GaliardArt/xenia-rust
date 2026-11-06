@@ -34,7 +34,7 @@ architectural conformance.
 | Integer memory | lbz/lhz/lha/stb/sth/lwz/stw; D-form update loads/stores; indexed byte/halfword/word forms and updates; lmw/stmw | string operations, byte-reverse, reservation/conditional, DS-form, integer 64-bit loads/stores, alignment exceptions, and complete store-range atomicity are absent. |
 | Scalar FP memory | lfs/lfd/stfs/stfd and indexed forms | FPSCR effects, NaN payloads, denormal/rounding behavior, precise FP exceptions and atomic 64-bit memory access need work. |
 | Scalar FP execution | fadd/fadds, fsub/fsubs, fdiv/fdivs, fmul/fmuls, fsel, fsqrt/fsqrts, fres, frsqrte, fmadd/fmsub/fnmadd/fnmsub and single variants; fabs/fmr/fnabs/fneg/frsp; fctiw/fctiwz/fctid/fctidz/fcfid; fcmpu/fcmpo; mcrfs/mffs/mtfsb0/mtfsb1/mtfsf/mtfsfi | FPSCR core status, FPRF, field moves, sticky summaries, invalid subcauses, conversion rounding, and single-result directed rounding are implemented. Exact binary64 directed rounding, full FR behavior, precise exception delivery, NaN payload fidelity, and hardware reciprocal estimates remain incomplete. |
-| VMX/AltiVec + Xenon VMX128 | All 239 entries in the focused Xenia reference inventory now map to Rust dispatch paths: 144 classic VMX arithmetic/logical/compare entries, 20 classic X-form vector-memory entries, and 75 Xenon VMX128 entries. Coverage includes primary opcodes 4/5/6, 128 vector registers, split register fields, all listed vector-memory selectors, arithmetic, permutation, conversion, pack/unpack, and VSCR paths. | This is **dispatch coverage, not semantic conformance**. VSCR.NJ denormal handling, exact hardware estimate results, floating NaN/signed-zero/rounding behavior, D3D pack/unpack lane placement, and full per-instruction differential validation remain open. The manifest is docs/ppc/vmx_opcode_audit.csv. GuestMemory implements checked contiguous reads/writes; generic GuestMemoryAccess fallbacks are sequential unless a backend overrides them. |
+| VMX/AltiVec + Xenon VMX128 | All 239 entries in the focused Xenia reference inventory now map to Rust dispatch paths: 144 classic VMX arithmetic/logical/compare entries, 20 classic X-form vector-memory entries, and 75 Xenon VMX128 entries. Coverage includes primary opcodes 4/5/6, 128 vector registers, split register fields, all listed vector-memory selectors, arithmetic, permutation, conversion, pack/unpack, and VSCR paths. | This is **dispatch coverage, not semantic conformance**. VSCR.NJ edge coverage, exact hardware estimate results, floating NaN/signed-zero/rounding behavior, remaining D3D packed formats, and full per-instruction differential validation remain open. The manifest is docs/ppc/vmx_opcode_audit.csv. GuestMemory implements checked contiguous reads/writes; generic GuestMemoryAccess fallbacks are sequential unless a backend overrides them. |
 | Exceptions | memory errors and unsupported-opcode errors surface to caller | no architectural program/data/alignment/FPU exceptions, interrupt state, exception vectors, or precise fault/retirement model. |
 
 ## VMX/AltiVec and Xenon VMX128 focused audit (2026-10-31)
@@ -114,16 +114,17 @@ The audit verified these decoder families:
 3. **Floating-point fidelity:** NaN payload propagation, signed zero, subnormals,
    rounding, fused multiply-add/subtract behavior, and estimate/conversion edge
    cases are not fully differentially validated.
-4. **D3D pack/unpack:** independent Xenia reference vectors now cover D3D color
-   and FLOAT16_4 packing, plus D3D color, SHORT_2, FLOAT16_2, and FLOAT16_4
-   unpacking. The remaining packed formats (including 2_10_10_10 and 4_20_20_20)
-   and the complete mask/shift cross-product still need independent fixtures. A
-   round trip between two Rust paths is not proof of architectural correctness.
+4. **D3D pack/unpack:** upstream Xenia golden vectors now cover D3D color,
+   SHORT_2, 2_10_10_10, FLOAT16_2, SHORT_4, and FLOAT16_4 packing; unpacking
+   fixtures cover D3D color, SHORT_2, 2_10_10_10, FLOAT16_2, SHORT_4, and
+   FLOAT16_4. All pack mask/shift combinations are tested against the Xenia
+   permute-mask table for FLOAT16_4. The rare 4_20_20_20 format and independent
+   hardware-level validation remain open.
 5. **Memory backends:** the concrete `GuestMemory` implementation preflights
    contiguous ranges. The trait's default `read_bytes`/`write_bytes` implementations
    are sequential; another backend must override them to guarantee the same
    transaction/fault behavior.
-6. **Per-instruction tests:** 192 workspace tests pass, but there is not yet one
+6. **Per-instruction tests:** 196 workspace tests pass, but there is not yet one
    independent deterministic test for every mnemonic, operand form, immediate
    value, record variant, and boundary condition. The CSV intentionally marks
    per-mnemonic and differential validation as unverified.
@@ -137,9 +138,9 @@ The audit verified these decoder families:
 - **Differentially validated:** results and side effects match an independent,
   trusted Xenon/reference oracle for deterministic vectors.
 
-Validation update (2026-10-31): commit
-`712b51077f635eb4236444cf665da05df8f49bf8` passed the Rust rewrite GitHub
-Actions workflow. Formatting, `cargo test --workspace --locked` (192 tests),
+Validation update (2026-11-06): commit
+`86854c58b33e3d4745abe5fd28970ed6393544bc` passed the Rust rewrite GitHub
+Actions workflow. Formatting, `cargo test --workspace --locked` (196 tests),
 Clippy with warnings denied, and CLI help smoke test all passed. This validates
 the workspace suite, not per-opcode differential conformance or hardware accuracy.
 ## Correctness risks found during inspection
