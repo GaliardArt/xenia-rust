@@ -9019,6 +9019,62 @@ mod tests {
         );
     }
     #[test]
+    fn classic_and_vmx128_vector_fp_add_sub_match_xenia_golden_vectors() {
+        let mut memory = GuestMemory::new(GuestAddress(0x1000), 16);
+        let encode_classic = |vd: u32, va: u32, vb: u32, xo: u32| {
+            (4 << 26) | (vd << 21) | (va << 16) | (vb << 11) | xo
+        };
+        let encode_vmx128 = |vd: u32, va: u32, vb: u32, operation: u32| {
+            (5 << 26)
+                | ((vd & 0x1F) << 21)
+                | ((va & 0x1F) << 16)
+                | ((vb & 0x1F) << 11)
+                | (((vd >> 5) & 3) << 2)
+                | (((va >> 5) & 1) << 5)
+                | (((va >> 6) & 1) << 10)
+                | ((vb >> 5) & 3)
+                | (((operation >> 2) & 0xF) << 6)
+                | ((operation & 1) << 4)
+        };
+        put_instruction(&mut memory, 0x1000, encode_classic(1, 2, 3, 10)); // vaddfp
+        put_instruction(&mut memory, 0x1004, encode_classic(4, 2, 3, 74)); // vsubfp
+        put_instruction(&mut memory, 0x1008, encode_vmx128(0x7D, 0x72, 0x43, 0b000001));
+        put_instruction(&mut memory, 0x100C, encode_vmx128(0x7C, 0x72, 0x43, 0b000101));
+
+        let a = [
+            0x41, 0x20, 0, 0, 0xC1, 0x20, 0, 0, 0x41, 0x70, 0, 0, 0xC1, 0x70, 0, 0,
+        ];
+        let b = [
+            0xC1, 0x20, 0, 0, 0x41, 0xA0, 0, 0, 0xC1, 0xA0, 0, 0, 0x41, 0xF0, 0, 0,
+        ];
+        let expected_add = [
+            0, 0, 0, 0, 0x41, 0x20, 0, 0, 0xC0, 0xA0, 0, 0, 0x41, 0x70, 0, 0,
+        ];
+        let expected_sub = [
+            0x41, 0xA0, 0, 0, 0xC1, 0xF0, 0, 0, 0x42, 0x0C, 0, 0, 0xC2, 0x34, 0, 0,
+        ];
+        let mut cpu = fp_enabled_cpu();
+        cpu.state.pc = 0x1000;
+        cpu.state.vr[2] = a;
+        cpu.state.vr[3] = b;
+        cpu.state.vr[0x72] = a;
+        cpu.state.vr[0x43] = b;
+
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[1], expected_add);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[4], expected_sub);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[0x7D], expected_add);
+        cpu.step(&mut memory).unwrap();
+        assert_eq!(cpu.state.vr[0x7C], expected_sub);
+        assert_eq!(cpu.state.vr[2], a);
+        assert_eq!(cpu.state.vr[3], b);
+        assert_eq!(cpu.state.vr[0x72], a);
+        assert_eq!(cpu.state.vr[0x43], b);
+    }
+
+    #[test]
     fn vscr_non_java_mode_flushes_vmx128_fma_and_float_compare_inputs() {
         let mut memory = GuestMemory::new(GuestAddress(0x1000), 8);
         let vd = 0x7D_u32;
