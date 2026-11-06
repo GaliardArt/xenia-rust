@@ -4077,37 +4077,40 @@ impl PpcInterpreter {
                     packed[16 - packed_len..].copy_from_slice(&packed_low);
                     let mut output = old;
                     let shift = ((instruction >> 6) & 3) as usize;
-                    match pack_mode {
-                        0 => {}
-                        1 => {
-                            let offset = (3 - shift) * 4;
-                            output[offset..offset + 4].copy_from_slice(&packed[12..16]);
-                        }
-                        2 => {
-                            if packed_len == 4 {
-                                let offset = (3 - shift) * 4;
-                                output[offset..offset + 4].copy_from_slice(&packed[12..16]);
-                            } else if shift == 3 {
-                                output[..4].copy_from_slice(&packed[12..16]);
-                            } else {
-                                let offset = [8, 4, 0][shift];
-                                output[offset..offset + 8].copy_from_slice(&packed[8..16]);
-                            }
-                        }
-                        3 => {
-                            if packed_len == 4 {
-                                if shift != 3 {
-                                    let offset = (3 - shift) * 4;
-                                    output[offset..offset + 4].copy_from_slice(&packed[12..16]);
-                                }
-                            } else if shift == 3 {
-                                output[12..16].copy_from_slice(&packed[8..12]);
-                            } else {
-                                let offset = [8, 4, 0][shift];
-                                output[offset..offset + 8].copy_from_slice(&packed[8..16]);
-                            }
-                        }
+                    let lanes: [(bool, usize); 4] = match pack_mode {
+                        0 => [(false, 0), (false, 1), (false, 2), (false, 3)],
+                        1 => match shift {
+                            0 => [(false, 0), (false, 1), (false, 2), (true, 3)],
+                            1 => [(false, 0), (false, 1), (true, 3), (false, 3)],
+                            2 => [(false, 0), (true, 3), (false, 2), (false, 3)],
+                            3 => [(true, 3), (false, 1), (false, 2), (false, 3)],
+                            _ => unreachable!(),
+                        },
+                        2 => match shift {
+                            0 => [(false, 0), (false, 1), (true, 2), (true, 3)],
+                            1 => [(false, 0), (true, 2), (true, 3), (false, 3)],
+                            2 => [(true, 2), (true, 3), (false, 2), (false, 3)],
+                            3 => [(true, 3), (false, 1), (false, 2), (false, 3)],
+                            _ => unreachable!(),
+                        },
+                        3 => match shift {
+                            0 => [(false, 0), (false, 1), (true, 2), (true, 3)],
+                            1 => [(false, 0), (true, 2), (true, 3), (false, 3)],
+                            2 => [(true, 2), (true, 3), (false, 2), (false, 3)],
+                            3 => [(false, 0), (false, 1), (false, 2), (true, 2)],
+                            _ => unreachable!(),
+                        },
                         _ => unreachable!(),
+                    };
+                    for (destination_lane, (from_packed, source_lane)) in
+                        lanes.into_iter().enumerate()
+                    {
+                        if from_packed {
+                            let source_offset = source_lane * 4;
+                            let destination_offset = destination_lane * 4;
+                            output[destination_offset..destination_offset + 4]
+                                .copy_from_slice(&packed[source_offset..source_offset + 4]);
+                        }
                     }
                     self.state.vr[registers.vd] = output;
                     self.state.pc = next_pc;
