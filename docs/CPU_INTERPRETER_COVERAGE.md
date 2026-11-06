@@ -128,7 +128,7 @@ The audit verified these decoder families:
    contiguous ranges. The trait's default `read_bytes`/`write_bytes` implementations
    are sequential; another backend must override them to guarantee the same
    transaction/fault behavior.
-6. **Per-instruction tests:** 197 workspace tests pass, but there is not yet one
+6. **Per-instruction tests:** 199 workspace tests pass, but there is not yet one
    independent deterministic test for every mnemonic, operand form, immediate
    value, record variant, and boundary condition. The CSV intentionally marks
    per-mnemonic and differential validation as unverified.
@@ -143,8 +143,8 @@ The audit verified these decoder families:
   trusted Xenon/reference oracle for deterministic vectors.
 
 Validation update (2026-11-06): commit
-`1ddd4a158421428cd56b681f5d3633254072d898` passed the Rust rewrite GitHub
-Actions workflow. Formatting, `cargo test --workspace --locked` (197 tests),
+`472d929e3b7e3cc45700520708957f8cd7b23526` passed the Rust rewrite GitHub
+Actions workflow. Formatting, `cargo test --workspace --locked` (199 tests),
 Clippy with warnings denied, and CLI help smoke test all passed. This validates
 the workspace suite, not per-opcode differential conformance or hardware accuracy.
 ## Correctness risks found during inspection
